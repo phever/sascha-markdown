@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/com/sascha/SFMDE">
-    <file alias="icons/logo.png">icons/logo.png</file>
+    <file alias="icons/com.sascha.SFMDE.png">icons/logo.png</file>
   </gresource>
 </gresources>

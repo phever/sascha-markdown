@@ -764,9 +764,9 @@ impl App {
         action_about.connect_activate(move |_, _| {
             let about = adw::AboutDialog::builder()
                 .application_name("SFMDE")
-                .application_icon("text-editor")
+                .application_icon("com.sascha.SFMDE")
                 .developer_name("Sascha")
-                .version("0.1.0")
+                .version(env!("CARGO_PKG_VERSION"))
                 .comments("A highly configurable Markdown editor with GTK4 and custom SFM support.")
                 .build();
             about.present(Some(&window_ab_clone));
