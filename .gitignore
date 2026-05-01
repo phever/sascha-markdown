@@ -1,0 +1,22 @@
+# Rust
+/target
+Cargo.lock
+
+# Sascha Flavored Markdown
+# Local configs are directory-specific and shouldn't usually be committed 
+# if they are used for local migration tracking.
+.smdconfig
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+test.smd

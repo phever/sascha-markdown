@@ -1,0 +1,197 @@
+version = "0.0.1"
+history_length = 100
+
+[formatters.italics]
+symbol = "*"
+visible = true
+icon_name = "format-text-italic-symbolic"
+
+[formatters.bold]
+symbol = "**"
+visible = true
+icon_name = "format-text-bold-symbolic"
+
+[formatters.underscore]
+symbol = "_"
+visible = true
+icon_name = "format-text-underline-symbolic"
+
+[formatters.strikethrough]
+symbol = "~~"
+visible = true
+icon_name = "format-text-strikethrough-symbolic"
+
+[formatters.paragraph]
+symbol = "\n\n"
+visible = false
+icon_name = "insert-text-symbolic"
+
+[formatters.preformatted]
+symbol = "```"
+visible = true
+icon_name = "text-x-generic-symbolic"
+
+[formatters.font_size_change]
+symbol = "size:"
+visible = false
+icon_name = "format-text-larger-symbolic"
+
+[formatters.align_left]
+symbol = "[:left]"
+visible = false
+icon_name = "format-justify-left-symbolic"
+
+[formatters.align_right]
+symbol = "[:right]"
+visible = false
+icon_name = "format-justify-right-symbolic"
+
+[formatters.align_center]
+symbol = "[:center]"
+visible = false
+icon_name = "format-justify-center-symbolic"
+
+[formatters.align_justify]
+symbol = "[:justify]"
+visible = false
+icon_name = "format-justify-fill-symbolic"
+
+[formatters.superscript]
+symbol = "^"
+visible = true
+icon_name = "format-text-superscript-symbolic"
+
+[formatters.subscript]
+symbol = "~"
+visible = true
+icon_name = "format-text-subscript-symbolic"
+
+[formatters.code_block]
+symbol = "```"
+visible = true
+icon_name = "applications-engineering-symbolic"
+
+[formatters.blockquote]
+symbol = ">"
+visible = true
+icon_name = "format-indent-more-symbolic"
+
+[formatters.nested_blockquote]
+symbol = ">>"
+visible = true
+icon_name = "format-indent-more-symbolic"
+
+[formatters.escape_char]
+symbol = "\\"
+visible = false
+icon_name = "media-playlist-consecutive-symbolic"
+
+[formatters.font_color]
+symbol = "color:"
+visible = false
+icon_name = "format-fill-color-symbolic"
+
+[formatters.highlight]
+symbol = "=="
+visible = true
+icon_name = "emblem-favorite-symbolic"
+
+[formatters.table_start]
+symbol = "|"
+visible = true
+icon_name = "view-grid-symbolic"
+
+[formatters.table_row]
+symbol = "|"
+visible = true
+icon_name = "view-grid-symbolic"
+
+[formatters.table_cell]
+symbol = "|"
+visible = true
+icon_name = "view-grid-symbolic"
+
+[formatters.url_link]
+symbol = "[]()"
+visible = true
+icon_name = "insert-link-symbolic"
+
+[formatters.image_insert]
+symbol = "![]()"
+visible = true
+icon_name = "insert-image-symbolic"
+
+[formatters.unordered_list]
+symbol = "- "
+visible = true
+icon_name = "view-list-symbolic"
+
+[formatters.ordered_list]
+symbol = "1. "
+visible = true
+icon_name = "view-sort-ascending-symbolic"
+
+[formatters.task_list]
+symbol = "- [ ] "
+visible = true
+icon_name = "emblem-ok-symbolic"
+
+[formatters.quote]
+symbol = "\""
+visible = true
+icon_name = "format-indent-more-symbolic"
+
+[formatters.named_quote]
+symbol = "quote:"
+visible = true
+icon_name = "format-indent-more-symbolic"
+
+[formatters.spoiler]
+symbol = "||"
+visible = true
+icon_name = "view-conceal-symbolic"
+
+[formatters.horizontal_rule]
+symbol = "---"
+visible = true
+icon_name = "window-minimize-symbolic"
+
+[formatters.heading_prefix]
+symbol = "#"
+visible = true
+icon_name = "format-text-larger-symbolic"
+
+[formatters.heading_id]
+symbol = "{#}"
+visible = false
+icon_name = "tag-symbolic"
+
+[formatters.footnote]
+symbol = "[^]"
+visible = false
+icon_name = "index-symbolic"
+
+[formatters.emoji_prefix]
+symbol = ":"
+visible = true
+icon_name = "face-smile-symbolic"
+
+[hotkeys.mappings]
+Bold = "<Control>b"
+Italics = "<Control>i"
+Underscore = "<Control>u"
+Strikethrough = "<Control>d"
+Save = "<Control>s"
+Open = "<Control>o"
+New_File = "<Control>n"
+Undo = "<Control>z"
+Redo = "<Control><Shift>z"
+
+[appearance]
+editor_font_family = "Monospace"
+editor_font_size = 14
+editor_bg_color = ""
+editor_fg_color = ""
+menu_icon_size = 16
+splitbar_color = "#ccc"
+splitbar_width = 2

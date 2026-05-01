@@ -1,0 +1,5 @@
+[MIME Type]
+MimeType=text/x-smd
+Icon=logo
+Patterns=*.smd;
+Description=Sascha Flavored Markdown document

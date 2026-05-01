@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=SFMDE
+Comment=Sascha Flavored Markdown Editor - A highly configurable Markdown editor.
+Exec=sfmde %f
+Icon=logo
+Terminal=false
+Type=Application
+Categories=Office;TextEditor;Development;
+MimeType=text/markdown;text/x-markdown;application/x-smd;text/x-smd;
+Keywords=Markdown;Sascha;Editor;GTK4;

@@ -1,0 +1,27 @@
+[package]
+name = "sfmde"
+version = "0.0.1"
+edition = "2024"
+
+[[bin]]
+name = "sfmde"
+path = "src/main.rs"
+
+[lib]
+name = "sfmde"
+path = "src/lib.rs"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_10"] }
+libadwaita = { version = "0.9", features = ["v1_5"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+pulldown-cmark = "0.11"
+directories = "5.0"
+sourceview5 = "0.11"
+anyhow = "1.0"
+gio = "0.22"
+glib = "0.22"
+regex = "1.10"
+webkit6 = "0.6"
+

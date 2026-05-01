@@ -1,0 +1,35 @@
+/* SFMDE Default Stylesheet */
+
+/* Headings */
+h1 { font-size: 2em; font-weight: bold; margin-bottom: 0.5em; }
+h2 { font-size: 1.5em; font-weight: bold; margin-bottom: 0.4em; }
+h3 { font-size: 1.25em; font-weight: bold; margin-bottom: 0.3em; }
+
+/* Text Formatting */
+strong { font-weight: bold; }
+em { font-style: italic; }
+u { text-decoration: underline; }
+s { text-decoration: line-through; }
+
+/* Blocks */
+p { margin-bottom: 1.5em; }
+blockquote { border-left: 4px solid #ccc; padding-left: 10px; color: #666; font-style: italic; }
+hr { border: 0; border-top: 1px solid #ccc; margin: 1em 0; }
+
+/* Special Tags */
+mark { background-color: yellow; color: black; }
+.spoiler { background-color: #333; color: #333; transition: color 0.3s; }
+.spoiler:hover { color: inherit; }
+
+/* Code */
+pre { background-color: #f4f4f4; padding: 10px; border-radius: 4px; font-family: monospace; }
+code { font-family: monospace; background-color: rgba(0,0,0,0.05); padding: 2px 4px; }
+
+/* Lists */
+ul, ol { margin-bottom: 1em; padding-left: 2em; }
+li { margin-bottom: 0.2em; }
+
+/* Links & Images */
+a { color: #3584e4; text-decoration: none; }
+a:hover { text-decoration: underline; }
+img { }
