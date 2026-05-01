@@ -15,6 +15,7 @@ The application uses standard Cargo commands:
 ### System Dependencies
 To build the project on Linux, you must have the development headers for GTK4, Libadwaita, GtkSourceView5, and WebKitGTK 6.0 installed:
 - Arch Linux: `sudo pacman -S --needed gtk4 libadwaita gtksourceview5 webkit2gtk-6.0 pkgconf base-devel`
+- Ubuntu/Debian: `sudo apt install libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config build-essential`
 
 ## Development Architecture
 1. **Core Parser (`src/parser.rs`)**: 
