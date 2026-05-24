@@ -181,6 +181,47 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     split_width_row.add_suffix(&split_width_spin);
     group.add(&split_width_row);
 
+    // Word Wrap
+    let wrap_row = adw::ActionRow::new();
+    wrap_row.set_title("Word Wrap");
+    wrap_row.set_subtitle("Wrap long lines in the editor");
+    let wrap_switch = gtk::Switch::new();
+    wrap_switch.set_active(config.appearance.word_wrap);
+    wrap_switch.set_valign(gtk::Align::Center);
+    wrap_row.add_suffix(&wrap_switch);
+    group.add(&wrap_row);
+
+    // Show Line/Col
+    let linecol_row = adw::ActionRow::new();
+    linecol_row.set_title("Show Line/Col");
+    linecol_row.set_subtitle("Show cursor position in the status bar");
+    let linecol_switch = gtk::Switch::new();
+    linecol_switch.set_active(config.appearance.show_line_col);
+    linecol_switch.set_valign(gtk::Align::Center);
+    linecol_row.add_suffix(&linecol_switch);
+    group.add(&linecol_row);
+
+    // Highlight Color
+    let hl_row = adw::ActionRow::new();
+    hl_row.set_title("Highlight Color");
+    hl_row.set_subtitle("CSS color for ==highlighted== text (empty = browser default yellow)");
+    let hl_entry = gtk::Entry::new();
+    hl_entry.set_text(&config.appearance.highlight_color);
+    hl_entry.set_valign(gtk::Align::Center);
+    hl_entry.set_placeholder_text(Some("e.g. #ffff00 or lightblue"));
+    hl_row.add_suffix(&hl_entry);
+    group.add(&hl_row);
+
+    // Local-Only Mode
+    let local_row = adw::ActionRow::new();
+    local_row.set_title("Local-Only Mode");
+    local_row.set_subtitle("Block all external (non-file://) network requests in preview");
+    let local_switch = gtk::Switch::new();
+    local_switch.set_active(config.appearance.local_only);
+    local_switch.set_valign(gtk::Align::Center);
+    local_row.add_suffix(&local_switch);
+    group.add(&local_row);
+
     let state_clone = state.clone();
     let ff_clone = font_family_entry.clone();
     let fs_clone = font_size_spin.clone();
@@ -189,6 +230,10 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     let is_clone = icon_size_spin.clone();
     let sc_clone = split_color_entry.clone();
     let sw_clone = split_width_spin.clone();
+    let wrap_clone = wrap_switch.clone();
+    let linecol_clone = linecol_switch.clone();
+    let hl_clone = hl_entry.clone();
+    let local_clone = local_switch.clone();
 
     let save_func = move || {
         let mut current_config = crate::config::get_global_config_path()
@@ -203,12 +248,29 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
         current_config.appearance.menu_icon_size = is_clone.value() as u32;
         current_config.appearance.splitbar_color = sc_clone.text().to_string();
         current_config.appearance.splitbar_width = sw_clone.value() as u32;
+        current_config.appearance.word_wrap = wrap_clone.is_active();
+        current_config.appearance.show_line_col = linecol_clone.is_active();
+        current_config.appearance.highlight_color = hl_clone.text().to_string();
+        current_config.appearance.local_only = local_clone.is_active();
 
         let _ = crate::config::save_global_config(&current_config);
 
         let mut s = state_clone.borrow_mut();
         s.config.appearance = current_config.appearance.clone();
         apply_appearance(&s.css_provider, &s.config.appearance);
+
+        // Apply word wrap to live editor
+        if let Some(view) = &s.editor_view {
+            if s.config.appearance.word_wrap {
+                view.set_wrap_mode(gtk4::WrapMode::WordChar);
+            } else {
+                view.set_wrap_mode(gtk4::WrapMode::None);
+            }
+        }
+        // Apply show_line_col to live status bar label
+        if let Some(label) = &s.cursor_label {
+            label.set_visible(s.config.appearance.show_line_col);
+        }
     };
 
     let s1 = save_func.clone(); font_family_entry.connect_changed(move |_| s1());
@@ -217,6 +279,10 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     let s4 = save_func.clone(); fg_color_entry.connect_changed(move |_| s4());
     let s5 = save_func.clone(); split_color_entry.connect_changed(move |_| s5());
     let s6 = save_func.clone(); split_width_spin.connect_value_changed(move |_| s6());
+    let s7 = save_func.clone(); hl_entry.connect_changed(move |_| s7());
+    let s8 = save_func.clone(); wrap_switch.connect_state_set(move |_, _| { s8(); glib::Propagation::Proceed });
+    let s9 = save_func.clone(); linecol_switch.connect_state_set(move |_, _| { s9(); glib::Propagation::Proceed });
+    let s10 = save_func.clone(); local_switch.connect_state_set(move |_, _| { s10(); glib::Propagation::Proceed });
     icon_size_spin.connect_value_changed(move |_| save_func());
 }
 

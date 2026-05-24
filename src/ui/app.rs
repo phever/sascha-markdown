@@ -87,6 +87,8 @@ impl App {
             is_dirty: false,
             toolbar: None,
             buffer: None,
+            editor_view: None,
+            cursor_label: None,
             editor_visible: true,
             preview_visible: false,
             preview_color_scheme: 0,
@@ -244,6 +246,13 @@ impl App {
         buffer.set_enable_undo(true);
         buffer.set_max_undo_levels(state.borrow().config.history_length as u32);
         state.borrow_mut().buffer = Some(buffer.clone());
+        state.borrow_mut().editor_view = Some(editor.clone());
+
+        if state.borrow().config.appearance.word_wrap {
+            editor.set_wrap_mode(gtk::WrapMode::WordChar);
+        } else {
+            editor.set_wrap_mode(gtk::WrapMode::None);
+        }
 
         // Sync color scheme with system
         let scheme_manager = source::StyleSchemeManager::default();
@@ -296,6 +305,35 @@ impl App {
         preview.set_visible(false);
         paned.set_end_child(Some(&preview));
         paned.set_resize_end_child(true);
+
+        // Block external (non-file://) navigation when local_only is enabled;
+        // always open clicked links in the system browser rather than the preview pane.
+        let local_only_init = config.appearance.local_only;
+        preview.connect_decide_policy(move |_, decision, decision_type| {
+            if decision_type == PolicyDecisionType::NavigationAction {
+                if let Ok(nav_decision) = decision.clone().downcast::<NavigationPolicyDecision>() {
+                    if let Some(action) = nav_decision.navigation_action() {
+                        let is_link_click = action.navigation_type() == NavigationType::LinkClicked;
+                        let uri = action.request()
+                            .and_then(|r| r.uri())
+                            .map(|s| s.to_string())
+                            .unwrap_or_default();
+                        let is_external = !uri.starts_with("file://") && !uri.starts_with("about:");
+                        if is_link_click && is_external {
+                            // Open external links in the system browser
+                            decision.ignore();
+                            gtk::show_uri(None::<&gtk::Window>, &uri, 0);
+                            return true;
+                        }
+                        if local_only_init && is_external {
+                            decision.ignore();
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        });
 
         let buffer_scheme_clone = buffer.clone();
         let update_scheme = {
@@ -438,6 +476,7 @@ impl App {
                 (is_smd, s.config.clone(), base_uri, s.preview_color_scheme)
             };
 
+            let highlight_color = config.appearance.highlight_color.clone();
             let mut body = crate::parser::render_to_html(&text, &config);
 
             if !is_smd {
@@ -451,7 +490,7 @@ impl App {
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .unwrap_or_default();
 
-            let html = crate::parser::build_html_document(&body, &css, preview_color_scheme);
+            let html = crate::parser::build_html_document(&body, &css, preview_color_scheme, &highlight_color);
             preview_clone.load_html(&html, base_uri.as_deref());
         });
 
@@ -467,7 +506,9 @@ impl App {
         main_box.append(&status_bar);
 
         let cursor_label = gtk::Label::new(Some("Line: 1, Col: 1"));
+        cursor_label.set_visible(state.borrow().config.appearance.show_line_col);
         status_bar.append(&cursor_label);
+        state.borrow_mut().cursor_label = Some(cursor_label.clone());
 
         let buffer_state_clone = state.clone();
         buffer.connect_cursor_position_notify(move |buf| {
@@ -517,6 +558,12 @@ impl App {
         let toggle_p_f_clone = toggle_preview_btn.clone();
         open_btn.connect_clicked(move |_| {
             let file_dialog = gtk::FileDialog::new();
+            // Restore last opened directory
+            let last_dir = state_f_clone.borrow().config.appearance.last_open_dir.clone();
+            if !last_dir.is_empty() {
+                let gfile = gio::File::for_path(&last_dir);
+                file_dialog.set_initial_folder(Some(&gfile));
+            }
             let window_inner = window_clone.clone();
             let buffer = buffer_clone.clone();
             let state = state_f_clone.clone();
@@ -525,10 +572,22 @@ impl App {
                 if let Ok(file) = res {
                     if let Some(path) = file.path() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
-                            state.borrow_mut().current_file = Some(path.clone());
+                            // Save the directory for next time
+                            if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+                                let mut s = state.borrow_mut();
+                                s.config.appearance.last_open_dir = dir.to_string();
+                                let mut disk_cfg = crate::config::get_global_config_path()
+                                    .and_then(|p| std::fs::read_to_string(p).ok())
+                                    .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
+                                    .unwrap_or_default();
+                                disk_cfg.appearance.last_open_dir = dir.to_string();
+                                let _ = crate::config::save_global_config(&disk_cfg);
+                                s.current_file = Some(path.clone());
+                                s.is_dirty = false;
+                            }
                             buffer.set_text(&content);
                             window_inner.set_title(Some(&format!("SFMDE - {}", path.display())));
-                            
+
                             let is_smd = path.extension()
                                 .and_then(|e| e.to_str())
                                 .map(|s| s == "smd")
@@ -606,7 +665,10 @@ impl App {
             if s.nav_index > 0 {
                 s.nav_index -= 1;
                 s.is_navigating = true;
-                let nav = s.nav_history[s.nav_index].clone();
+                let nav = match s.nav_history.get(s.nav_index).cloned() {
+                    Some(n) => n,
+                    None => { s.is_navigating = false; return; }
+                };
                 
                 if nav.file != s.current_file {
                     if let Some(path) = &nav.file {
@@ -642,7 +704,10 @@ impl App {
             if s.nav_index + 1 < s.nav_history.len() {
                 s.nav_index += 1;
                 s.is_navigating = true;
-                let nav = s.nav_history[s.nav_index].clone();
+                let nav = match s.nav_history.get(s.nav_index).cloned() {
+                    Some(n) => n,
+                    None => { s.is_navigating = false; return; }
+                };
                 
                 if nav.file != s.current_file {
                     if let Some(path) = &nav.file {
