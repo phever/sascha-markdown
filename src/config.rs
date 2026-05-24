@@ -22,6 +22,7 @@ impl FormatterEntry {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct FormatterConfig {
     pub italics: FormatterEntry,
     pub bold: FormatterEntry,
@@ -58,6 +59,7 @@ pub struct FormatterConfig {
     pub heading_id: FormatterEntry,
     pub footnote: FormatterEntry,
     pub emoji_prefix: FormatterEntry,
+    pub collapse: FormatterEntry,
 }
 
 impl FormatterConfig {
@@ -98,6 +100,7 @@ impl FormatterConfig {
             ("Heading ID".to_string(), self.heading_id.symbol.clone(), self.heading_id.visible, self.heading_id.icon_name.clone()),
             ("Footnote".to_string(), self.footnote.symbol.clone(), self.footnote.visible, self.footnote.icon_name.clone()),
             ("Emoji Prefix".to_string(), self.emoji_prefix.symbol.clone(), self.emoji_prefix.visible, self.emoji_prefix.icon_name.clone()),
+            ("Collapse".to_string(), self.collapse.symbol.clone(), self.collapse.visible, self.collapse.icon_name.clone()),
         ]
     }
 
@@ -139,6 +142,7 @@ impl FormatterConfig {
                 "Heading ID" => self.heading_id = FormatterEntry::new(&symbol, visible, &icon_name),
                 "Footnote" => self.footnote = FormatterEntry::new(&symbol, visible, &icon_name),
                 "Emoji Prefix" => self.emoji_prefix = FormatterEntry::new(&symbol, visible, &icon_name),
+                "Collapse" => self.collapse = FormatterEntry::new(&symbol, visible, &icon_name),
                 _ => {}
             }
         }
@@ -183,6 +187,7 @@ impl Default for FormatterConfig {
             heading_id: FormatterEntry::new("{#}", false, "tag-symbolic"),
             footnote: FormatterEntry::new("[^]", false, "index-symbolic"),
             emoji_prefix: FormatterEntry::new(":", true, "face-smile-symbolic"),
+            collapse: FormatterEntry::new("+++", false, "go-down-symbolic"),
         }
     }
 }
@@ -235,6 +240,7 @@ impl HotkeysConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct AppearanceConfig {
     pub editor_font_family: String,
     pub editor_font_size: u32,
@@ -243,6 +249,11 @@ pub struct AppearanceConfig {
     pub menu_icon_size: u32,
     pub splitbar_color: String,
     pub splitbar_width: u32,
+    pub word_wrap: bool,
+    pub show_line_col: bool,
+    pub highlight_color: String,
+    pub last_open_dir: String,
+    pub local_only: bool,
 }
 
 impl Default for AppearanceConfig {
@@ -255,6 +266,11 @@ impl Default for AppearanceConfig {
             menu_icon_size: 16,
             splitbar_color: "#ccc".to_string(),
             splitbar_width: 2,
+            word_wrap: false,
+            show_line_col: true,
+            highlight_color: "".to_string(),
+            last_open_dir: "".to_string(),
+            local_only: false,
         }
     }
 }
