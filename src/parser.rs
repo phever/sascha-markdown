@@ -201,6 +201,19 @@ html.dark-mode body {{ background-color: #1e1e1e; color: #e0e0e0; }}
 .error {{ text-decoration: underline wavy red; }}
 .warning {{ color: red; font-weight: bold; border: 1px solid red; padding: 4px 8px; border-radius: 4px; margin-bottom: 1em; display: inline-block; }}
 </style>
+<script>
+(function() {{
+    var saved = sessionStorage.getItem('sfmde_scrollY');
+    if (saved) {{
+        document.addEventListener('DOMContentLoaded', function() {{
+            window.scrollTo(0, parseInt(saved, 10));
+        }});
+    }}
+    window.addEventListener('scroll', function() {{
+        sessionStorage.setItem('sfmde_scrollY', window.scrollY);
+    }}, {{ passive: true }});
+}})();
+</script>
 </head>
 <body>
 {body}
