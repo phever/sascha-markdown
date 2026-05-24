@@ -84,6 +84,7 @@ impl App {
             nav_history: Vec::new(),
             nav_index: 0,
             is_navigating: false,
+            is_dirty: false,
             toolbar: None,
             buffer: None,
             editor_visible: true,
@@ -421,6 +422,8 @@ impl App {
         buffer.connect_changed(move |buf| {
             let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
 
+            state_clone.borrow_mut().is_dirty = true;
+
             let (is_smd, config, base_uri, preview_color_scheme) = {
                 let s = state_clone.borrow();
                 let is_smd = s.current_file.as_ref()
@@ -551,9 +554,12 @@ impl App {
                 file_dialog.save(Some(&window), gio::Cancellable::NONE, move |res| {
                     if let Ok(file) = res {
                         if let Some(path) = file.path() {
-                            state.borrow_mut().current_file = Some(path.clone());
                             let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
-                            let _ = std::fs::write(&path, text);
+                            if std::fs::write(&path, text).is_ok() {
+                                let mut s = state.borrow_mut();
+                                s.current_file = Some(path.clone());
+                                s.is_dirty = false;
+                            }
                             window_inner.set_title(Some(&format!("SFMDE - {}", path.display())));
                             
                             let is_smd = path.extension()
@@ -567,6 +573,8 @@ impl App {
                             let mut start = buffer.start_iter();
                             buffer.insert(&mut start, "");
                             buffer.end_user_action();
+                            // connect_changed fires synchronously above and marks dirty; undo that
+                            state.borrow_mut().is_dirty = false;
                         }
                     }
                 });
@@ -580,7 +588,9 @@ impl App {
             let path = state_s_clone.borrow().current_file.clone();
             if let Some(path) = path {
                 let text = buffer_s_clone.text(&buffer_s_clone.start_iter(), &buffer_s_clone.end_iter(), false);
-                let _ = std::fs::write(path, text);
+                if std::fs::write(path, text).is_ok() {
+                    state_s_clone.borrow_mut().is_dirty = false;
+                }
             } else {
                 save_as_clone();
             }
@@ -777,6 +787,32 @@ impl App {
         let window_settings_clone = window.clone();
         settings_btn.connect_clicked(move |_| {
             show_settings_dialog(&window_settings_clone, state_settings_clone.clone());
+        });
+
+        // Warn on close if there are unsaved changes
+        let state_close_clone = state.clone();
+        let window_close_clone = window.clone();
+        window.connect_close_request(move |_| {
+            if !state_close_clone.borrow().is_dirty {
+                return glib::Propagation::Proceed;
+            }
+            let dialog = adw::AlertDialog::new(
+                Some("Unsaved Changes"),
+                Some("You have unsaved changes. Do you want to discard them?"),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("discard", "Discard");
+            dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+            let window_inner = window_close_clone.clone();
+            dialog.connect_response(None, move |_, response| {
+                if response == "discard" {
+                    window_inner.destroy();
+                }
+            });
+            dialog.present(Some(&window_close_clone));
+            glib::Propagation::Stop
         });
 
         Self {

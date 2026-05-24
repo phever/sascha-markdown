@@ -23,6 +23,7 @@ pub struct AppState {
     pub nav_history: Vec<NavState>,
     pub nav_index: usize,
     pub is_navigating: bool,
+    pub is_dirty: bool,
     pub toolbar: Option<gtk::Box>,
     pub buffer: Option<source::Buffer>,
     pub editor_visible: bool,
