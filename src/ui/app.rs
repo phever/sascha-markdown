@@ -89,6 +89,7 @@ impl App {
             buffer: None,
             editor_view: None,
             cursor_label: None,
+            preview_toggle: None,
             editor_visible: true,
             preview_visible: false,
             preview_color_scheme: 0,
@@ -179,6 +180,7 @@ impl App {
             .tooltip_text("Show/Hide Preview")
             .build();
         header.pack_end(&toggle_preview_btn);
+        state.borrow_mut().preview_toggle = Some(toggle_preview_btn.clone());
 
         let preview_mode_btn = gtk::Button::builder()
             .icon_name("display-brightness-symbolic")
@@ -234,6 +236,9 @@ impl App {
 
         // Editor
         let editor_scroll = gtk::ScrolledWindow::new();
+        // Disable overlay scrolling so the horizontal scrollbar never floats
+        // over the last line of text.
+        editor_scroll.set_overlay_scrolling(false);
         let editor = source::View::new();
         editor.set_monospace(true);
         editor.set_show_line_numbers(true);
@@ -322,7 +327,7 @@ impl App {
                         if is_link_click && is_external {
                             // Open external links in the system browser
                             decision.ignore();
-                            gtk::show_uri(None::<&gtk::Window>, &uri, 0);
+                            let _ = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>);
                             return true;
                         }
                         if local_only_init && is_external {
@@ -885,6 +890,38 @@ impl App {
             editor,
             preview,
             state,
+        }
+    }
+
+    /// Open a file by path, replacing the current buffer contents.
+    pub fn open_file(&self, path: &std::path::Path) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let is_smd = path.extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s == "smd")
+                .unwrap_or(false);
+            {
+                let mut s = self.state.borrow_mut();
+                s.current_file = Some(path.to_path_buf());
+                s.is_dirty = false;
+                if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+                    s.config.appearance.last_open_dir = dir.to_string();
+                    let mut disk_cfg = crate::config::get_global_config_path()
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                        .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
+                        .unwrap_or_default();
+                    disk_cfg.appearance.last_open_dir = dir.to_string();
+                    let _ = crate::config::save_global_config(&disk_cfg);
+                }
+                if let Some(toggle) = &s.preview_toggle {
+                    toggle.set_active(is_smd);
+                }
+            }
+            let buffer = self.editor.buffer()
+                .downcast::<source::Buffer>()
+                .unwrap();
+            buffer.set_text(&content);
+            self.window.set_title(Some(&format!("SFMDE - {}", path.display())));
         }
     }
 }

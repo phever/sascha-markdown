@@ -28,6 +28,7 @@ pub struct AppState {
     pub buffer: Option<source::Buffer>,
     pub editor_view: Option<source::View>,
     pub cursor_label: Option<gtk::Label>,
+    pub preview_toggle: Option<gtk::ToggleButton>,
     pub editor_visible: bool,
     pub preview_visible: bool,
     pub preview_color_scheme: i32, // 0: System, 1: Light, 2: Dark
