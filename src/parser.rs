@@ -234,7 +234,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
             skip = config.formatters.strikethrough.symbol.chars().count();
         } else if match_at(&chars, i, &config.formatters.spoiler.symbol) {
             matched_tag = Some("Spoiler".to_string());
-            html_open = r#"<span class="spoiler">"#.to_string();
+            html_open = r#"<span class="spoiler" onclick="this.classList.toggle('revealed')" title="Click to reveal">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.spoiler.symbol.chars().count();
         } else if match_at(&chars, i, &config.formatters.highlight.symbol) {
@@ -584,6 +584,22 @@ html.dark-mode details {{ border-color: #555; }}
 {css}
 .error {{ text-decoration: underline wavy red; }}
 .warning {{ color: red; font-weight: bold; border: 1px solid red; padding: 4px 8px; border-radius: 4px; margin-bottom: 1em; display: inline-block; }}
+span.spoiler {{
+    background-color: rgba(0,0,0,0.85);
+    color: transparent;
+    border-radius: 3px;
+    padding: 0 3px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s, color 0.2s;
+}}
+span.spoiler.revealed {{
+    background-color: rgba(0,0,0,0.12);
+    color: inherit;
+    user-select: text;
+}}
+html.dark-mode span.spoiler {{ background-color: rgba(255,255,255,0.15); }}
+html.dark-mode span.spoiler.revealed {{ background-color: rgba(255,255,255,0.08); }}
 [data-src-line].sfmde-cursor-line {{
     outline: 2px solid rgba(100,140,255,0.55);
     outline-offset: 2px;
