@@ -234,7 +234,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
             skip = config.formatters.strikethrough.symbol.chars().count();
         } else if match_at(&chars, i, &config.formatters.spoiler.symbol) {
             matched_tag = Some("Spoiler".to_string());
-            html_open = r#"<span class="spoiler" onclick="this.classList.toggle('revealed')" title="Click to reveal">"#.to_string();
+            html_open = r#"<span class="spoiler">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.spoiler.symbol.chars().count();
         } else if match_at(&chars, i, &config.formatters.highlight.symbol) {
@@ -441,25 +441,39 @@ fn tag_html_close(end: &TagEnd) -> &'static str {
 }
 
 pub fn render_to_html(text: &str, config: &Config) -> String {
-    let preprocessed = preprocess_smd(text, config);
     let options = Options::all();
 
-    // Build a byte→line map so we can tag each block with its source line.
-    let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(preprocessed.match_indices('\n').map(|(i, _)| i + 1))
+    // First pass: collect block line numbers from the ORIGINAL text (before preprocessing
+    // can shift line counts by consuming header newlines in named_quote / collapse).
+    let orig_line_starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
         .collect();
-    let byte_to_line = |byte: usize| -> u32 {
-        line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
+    let orig_byte_to_line = |byte: usize| -> u32 {
+        orig_line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
     };
+    let mut orig_block_lines: Vec<u32> = Vec::new();
+    for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+        if let Event::Start(ref tag) = event {
+            if is_block_open(tag) {
+                orig_block_lines.push(orig_byte_to_line(range.start));
+            }
+        }
+    }
 
+    // Second pass: render the preprocessed text, assigning data-src-line from orig_block_lines
+    // in block-index order (preprocessing preserves block order).
+    let preprocessed = preprocess_smd(text, config);
     let parser = Parser::new_ext(&preprocessed, options).into_offset_iter();
     let mut body = String::new();
     let mut heading_level: Option<pulldown_cmark::HeadingLevel> = None;
+    let mut block_idx: usize = 0;
 
-    for (event, range) in parser {
+    for (event, _range) in parser {
         match event {
             Event::Start(ref tag) if is_block_open(tag) => {
-                let line = byte_to_line(range.start);
+                let line = orig_block_lines.get(block_idx).copied()
+                    .unwrap_or(block_idx as u32 + 1);
+                block_idx += 1;
                 if let Tag::Heading { level, .. } = tag {
                     heading_level = Some(*level);
                     body.push_str(&format!(r#"<{level} data-src-line="{line}">"#));
@@ -630,6 +644,11 @@ html.dark-mode span.spoiler.revealed {{ background-color: rgba(255,255,255,0.08)
         }}
         best.classList.add('sfmde-cursor-line');
     }};
+
+    document.addEventListener('click', function(e) {{
+        var s = e.target.closest('.spoiler');
+        if (s) s.classList.toggle('revealed');
+    }});
 
     window._sfmde_syncScroll = function(fraction) {{
         var max = document.documentElement.scrollHeight - window.innerHeight;
