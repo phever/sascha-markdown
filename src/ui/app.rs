@@ -36,9 +36,6 @@ pub fn apply_appearance(provider: &gtk::CssProvider, config: &crate::config::App
             outline: 2px solid rgba(0,0,0,0.35);
             outline-offset: -2px;
         }}
-        @media (prefers-color-scheme: dark) {{
-            .dialog-border {{ outline-color: rgba(0,0,0,0.65); }}
-        }}
     ",
         config.editor_font_family,
         config.editor_font_size,
@@ -829,23 +826,61 @@ impl App {
             if !state_close_clone.borrow().is_dirty {
                 return glib::Propagation::Proceed;
             }
-            let dialog = adw::AlertDialog::new(
-                Some("Unsaved Changes"),
-                Some("You have unsaved changes. Do you want to discard them?"),
-            );
-            dialog.add_css_class("dialog-border");
-            dialog.add_response("cancel", "Cancel");
-            dialog.add_response("discard", "Discard");
-            dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
-            dialog.set_default_response(Some("cancel"));
-            dialog.set_close_response("cancel");
+            let dlg = adw::Window::builder()
+                .modal(true)
+                .transient_for(&window_close_clone)
+                .default_width(360)
+                .resizable(false)
+                .title("Unsaved Changes")
+                .build();
+            dlg.add_css_class("dialog-border");
+
+            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            let hbar = adw::HeaderBar::new();
+            hbar.set_show_end_title_buttons(false);
+            vbox.append(&hbar);
+
+            let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+            body.set_margin_top(12);
+            body.set_margin_bottom(24);
+            body.set_margin_start(24);
+            body.set_margin_end(24);
+
+            let heading = gtk::Label::new(Some("Discard unsaved changes?"));
+            heading.add_css_class("title-3");
+            heading.set_halign(gtk::Align::Start);
+            body.append(&heading);
+
+            let msg = gtk::Label::new(Some("Your changes will be lost if you close without saving."));
+            msg.set_wrap(true);
+            msg.set_halign(gtk::Align::Start);
+            msg.add_css_class("dim-label");
+            body.append(&msg);
+
+            let btn_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            btn_row.set_halign(gtk::Align::End);
+            btn_row.set_margin_top(8);
+            let cancel_btn = gtk::Button::with_label("Cancel");
+            let discard_btn = gtk::Button::with_label("Discard");
+            discard_btn.add_css_class("destructive-action");
+            btn_row.append(&cancel_btn);
+            btn_row.append(&discard_btn);
+            body.append(&btn_row);
+
+            vbox.append(&body);
+            dlg.set_content(Some(&vbox));
+
+            let dlg_c = dlg.clone();
+            cancel_btn.connect_clicked(move |_| dlg_c.close());
+
+            let dlg_d = dlg.clone();
             let window_inner = window_close_clone.clone();
-            dialog.connect_response(None, move |_, response| {
-                if response == "discard" {
-                    window_inner.destroy();
-                }
+            discard_btn.connect_clicked(move |_| {
+                dlg_d.close();
+                window_inner.destroy();
             });
-            dialog.present(Some(&window_close_clone));
+
+            dlg.present();
             glib::Propagation::Stop
         });
 
