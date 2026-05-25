@@ -241,7 +241,7 @@ impl App {
         editor_scroll.set_overlay_scrolling(false);
         let editor = source::View::new();
         editor.set_monospace(true);
-        editor.set_show_line_numbers(true);
+        editor.set_show_line_numbers(config.appearance.show_line_numbers);
         editor.set_highlight_current_line(true);
         editor.set_auto_indent(true);
         editor.set_insert_spaces_instead_of_tabs(true);

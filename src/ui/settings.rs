@@ -3,11 +3,14 @@ use gtk::glib;
 use gtk::prelude::*;
 use libadwaita as adw;
 use adw::prelude::*;
+use sourceview5 as source;
+use source::prelude::*;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::ui::AppState;
 use crate::ui::toolbar::refresh_toolbar;
 use crate::ui::app::{apply_appearance, setup_accels};
+use gtk::pango;
 
 pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {
     let dialog = adw::PreferencesWindow::builder()
@@ -116,23 +119,20 @@ pub fn populate_hotkeys_group(group: &adw::PreferencesGroup, config: crate::conf
 }
 
 pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::config::Config, state: Rc<RefCell<AppState>>) {
-    // Font Family
-    let font_family_row = adw::ActionRow::new();
-    font_family_row.set_title("Font Family");
-    let font_family_entry = gtk::Entry::new();
-    font_family_entry.set_text(&config.appearance.editor_font_family);
-    font_family_entry.set_valign(gtk::Align::Center);
-    font_family_row.add_suffix(&font_family_entry);
-    group.add(&font_family_row);
-
-    // Font Size
-    let font_size_row = adw::ActionRow::new();
-    font_size_row.set_title("Font Size");
-    let font_size_spin = gtk::SpinButton::with_range(8.0, 72.0, 1.0);
-    font_size_spin.set_value(config.appearance.editor_font_size as f64);
-    font_size_spin.set_valign(gtk::Align::Center);
-    font_size_row.add_suffix(&font_size_spin);
-    group.add(&font_size_row);
+    // Editor Font (family + size combined via FontDialogButton)
+    let font_row = adw::ActionRow::new();
+    font_row.set_title("Editor Font");
+    font_row.set_subtitle("Family and size for the editor pane");
+    let font_dialog = gtk::FontDialog::new();
+    let font_btn = gtk::FontDialogButton::new(Some(font_dialog));
+    font_btn.set_use_font(true);
+    font_btn.set_use_size(true);
+    font_btn.set_valign(gtk::Align::Center);
+    // Initialise from stored family + size
+    let initial_font = format!("{} {}", config.appearance.editor_font_family, config.appearance.editor_font_size);
+    font_btn.set_font_desc(&pango::FontDescription::from_string(&initial_font));
+    font_row.add_suffix(&font_btn);
+    group.add(&font_row);
 
     // Bg Color
     let bg_color_row = adw::ActionRow::new();
@@ -191,9 +191,19 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     wrap_row.add_suffix(&wrap_switch);
     group.add(&wrap_row);
 
+    // Show Line Numbers
+    let linenum_row = adw::ActionRow::new();
+    linenum_row.set_title("Show Line Numbers");
+    linenum_row.set_subtitle("Show the line-number gutter in the editor");
+    let linenum_switch = gtk::Switch::new();
+    linenum_switch.set_active(config.appearance.show_line_numbers);
+    linenum_switch.set_valign(gtk::Align::Center);
+    linenum_row.add_suffix(&linenum_switch);
+    group.add(&linenum_row);
+
     // Show Line/Col
     let linecol_row = adw::ActionRow::new();
-    linecol_row.set_title("Show Line/Col");
+    linecol_row.set_title("Show Line/Col Status");
     linecol_row.set_subtitle("Show cursor position in the status bar");
     let linecol_switch = gtk::Switch::new();
     linecol_switch.set_active(config.appearance.show_line_col);
@@ -223,14 +233,14 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     group.add(&local_row);
 
     let state_clone = state.clone();
-    let ff_clone = font_family_entry.clone();
-    let fs_clone = font_size_spin.clone();
+    let font_btn_clone = font_btn.clone();
     let bg_clone = bg_color_entry.clone();
     let fg_clone = fg_color_entry.clone();
     let is_clone = icon_size_spin.clone();
     let sc_clone = split_color_entry.clone();
     let sw_clone = split_width_spin.clone();
     let wrap_clone = wrap_switch.clone();
+    let linenum_clone = linenum_switch.clone();
     let linecol_clone = linecol_switch.clone();
     let hl_clone = hl_entry.clone();
     let local_clone = local_switch.clone();
@@ -241,14 +251,27 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
             .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
             .unwrap_or_default();
 
-        current_config.appearance.editor_font_family = ff_clone.text().to_string();
-        current_config.appearance.editor_font_size = fs_clone.value() as u32;
+        // Extract family and size from the FontDialogButton's FontDescription
+        if let Some(desc) = font_btn_clone.font_desc() {
+            if let Some(family) = desc.family() {
+                current_config.appearance.editor_font_family = family.to_string();
+            }
+            let size_pango = desc.size();
+            if size_pango > 0 {
+                let size_pts = (size_pango / pango::SCALE) as u32;
+                if size_pts > 0 {
+                    current_config.appearance.editor_font_size = size_pts;
+                }
+            }
+        }
+
         current_config.appearance.editor_bg_color = bg_clone.text().to_string();
         current_config.appearance.editor_fg_color = fg_clone.text().to_string();
         current_config.appearance.menu_icon_size = is_clone.value() as u32;
         current_config.appearance.splitbar_color = sc_clone.text().to_string();
         current_config.appearance.splitbar_width = sw_clone.value() as u32;
         current_config.appearance.word_wrap = wrap_clone.is_active();
+        current_config.appearance.show_line_numbers = linenum_clone.is_active();
         current_config.appearance.show_line_col = linecol_clone.is_active();
         current_config.appearance.highlight_color = hl_clone.text().to_string();
         current_config.appearance.local_only = local_clone.is_active();
@@ -259,31 +282,30 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
         s.config.appearance = current_config.appearance.clone();
         apply_appearance(&s.css_provider, &s.config.appearance);
 
-        // Apply word wrap to live editor
         if let Some(view) = &s.editor_view {
-            if s.config.appearance.word_wrap {
-                view.set_wrap_mode(gtk4::WrapMode::WordChar);
+            view.set_wrap_mode(if s.config.appearance.word_wrap {
+                gtk4::WrapMode::WordChar
             } else {
-                view.set_wrap_mode(gtk4::WrapMode::None);
-            }
+                gtk4::WrapMode::None
+            });
+            view.set_show_line_numbers(s.config.appearance.show_line_numbers);
         }
-        // Apply show_line_col to live status bar label
         if let Some(label) = &s.cursor_label {
             label.set_visible(s.config.appearance.show_line_col);
         }
     };
 
-    let s1 = save_func.clone(); font_family_entry.connect_changed(move |_| s1());
-    let s2 = save_func.clone(); font_size_spin.connect_value_changed(move |_| s2());
-    let s3 = save_func.clone(); bg_color_entry.connect_changed(move |_| s3());
-    let s4 = save_func.clone(); fg_color_entry.connect_changed(move |_| s4());
-    let s5 = save_func.clone(); split_color_entry.connect_changed(move |_| s5());
-    let s6 = save_func.clone(); split_width_spin.connect_value_changed(move |_| s6());
-    let s7 = save_func.clone(); hl_entry.connect_changed(move |_| s7());
-    let s8 = save_func.clone(); wrap_switch.connect_state_set(move |_, _| { s8(); glib::Propagation::Proceed });
+    let s1 = save_func.clone(); bg_color_entry.connect_changed(move |_| s1());
+    let s2 = save_func.clone(); fg_color_entry.connect_changed(move |_| s2());
+    let s3 = save_func.clone(); split_color_entry.connect_changed(move |_| s3());
+    let s4 = save_func.clone(); split_width_spin.connect_value_changed(move |_| s4());
+    let s5 = save_func.clone(); hl_entry.connect_changed(move |_| s5());
+    let s6 = save_func.clone(); icon_size_spin.connect_value_changed(move |_| s6());
+    let s7 = save_func.clone(); wrap_switch.connect_state_set(move |_, _| { s7(); glib::Propagation::Proceed });
+    let s8 = save_func.clone(); linenum_switch.connect_state_set(move |_, _| { s8(); glib::Propagation::Proceed });
     let s9 = save_func.clone(); linecol_switch.connect_state_set(move |_, _| { s9(); glib::Propagation::Proceed });
     let s10 = save_func.clone(); local_switch.connect_state_set(move |_, _| { s10(); glib::Propagation::Proceed });
-    icon_size_spin.connect_value_changed(move |_| save_func());
+    font_btn.connect_font_desc_notify(move |_| save_func());
 }
 
 pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::config::Config, is_global: bool, state: Rc<RefCell<AppState>>) {
