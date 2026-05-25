@@ -407,7 +407,7 @@ pub fn render_to_html(text: &str, config: &Config) -> String {
 }
 
 /// Wraps a body fragment in a complete HTML document, injecting the provided CSS.
-pub fn build_html_document(body: &str, css: &str, mode: i32, highlight_color: &str) -> String {
+pub fn build_html_document(body: &str, css: &str, mode: i32, highlight_color: &str, local_only: bool) -> String {
     let mode_class = match mode {
         1 => "light-mode",
         2 => "dark-mode",
@@ -420,12 +420,19 @@ pub fn build_html_document(body: &str, css: &str, mode: i32, highlight_color: &s
         format!("mark {{ background-color: {}; }}", highlight_color)
     };
 
+    let csp_tag = if local_only {
+        r#"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file: data: blob:; font-src file: data:;">"#
+    } else {
+        ""
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html class="{mode_class}">
 <head>
 <meta charset="utf-8">
 <meta name="color-scheme" content="light dark">
+{csp_tag}
 <style>
 :root {{ color-scheme: light dark; }}
 html.light-mode {{ color-scheme: light; --bg: white; --fg: black; }}

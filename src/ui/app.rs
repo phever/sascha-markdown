@@ -396,26 +396,6 @@ impl App {
             update_scheme_mode_clone(style_manager_mode_clone.is_dark());
         });
 
-        // Open links in the system browser instead of navigating the WebView.
-        let window_clone_link = window.clone();
-        preview.connect_decide_policy(move |_, decision, decision_type| {
-            if decision_type == PolicyDecisionType::NavigationAction {
-                if let Ok(nav) = decision.clone().downcast::<NavigationPolicyDecision>() {
-                    if let Some(action) = nav.navigation_action() {
-                        if action.navigation_type() == NavigationType::LinkClicked {
-                            if let Some(uri) = action.request().and_then(|r| r.uri()) {
-                                let launcher = gtk::UriLauncher::new(&uri);
-                                launcher.launch(Some(&window_clone_link), None::<&gio::Cancellable>, |_| {});
-                            }
-                            nav.ignore();
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        });
-
         let editor_scroll_clone = editor_scroll.clone();
         let preview_clone_toggle = preview.clone();
         let state_toggle_clone = state.clone();
@@ -478,7 +458,7 @@ impl App {
 
             state_clone.borrow_mut().is_dirty = true;
 
-            let (is_smd, config, base_uri, preview_color_scheme) = {
+            let (is_smd, config, base_uri, preview_color_scheme, _) = {
                 let s = state_clone.borrow();
                 let is_smd = s.current_file.as_ref()
                     .and_then(|p| p.extension())
@@ -489,10 +469,11 @@ impl App {
                     .and_then(|p| p.parent())
                     .and_then(|d| d.to_str())
                     .map(|d| format!("file://{}/", d));
-                (is_smd, s.config.clone(), base_uri, s.preview_color_scheme)
+                (is_smd, s.config.clone(), base_uri, s.preview_color_scheme, s.config.appearance.local_only)
             };
 
             let highlight_color = config.appearance.highlight_color.clone();
+            let local_only = config.appearance.local_only;
             let mut body = crate::parser::render_to_html(&text, &config);
 
             if !is_smd {
@@ -506,7 +487,7 @@ impl App {
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .unwrap_or_default();
 
-            let html = crate::parser::build_html_document(&body, &css, preview_color_scheme, &highlight_color);
+            let html = crate::parser::build_html_document(&body, &css, preview_color_scheme, &highlight_color, local_only);
             preview_clone.load_html(&html, base_uri.as_deref());
         });
 
