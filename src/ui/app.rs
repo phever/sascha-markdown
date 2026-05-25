@@ -16,6 +16,27 @@ use crate::ui::markup::apply_markup;
 use crate::ui::toolbar::refresh_toolbar;
 use crate::ui::settings::show_settings_dialog;
 
+fn rebuild_recents_menu(state: &Rc<RefCell<AppState>>) {
+    let s = state.borrow();
+    if let Some(menu) = &s.recents_menu {
+        while menu.n_items() > 0 {
+            menu.remove(0);
+        }
+        for path in s.config.recent_files.iter().take(3) {
+            let label = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+            let item = gio::MenuItem::new(Some(label), None);
+            item.set_action_and_target_value(
+                Some("app.open-recent"),
+                Some(&path.to_variant()),
+            );
+            menu.append_item(&item);
+        }
+    }
+}
+
 pub fn apply_appearance(provider: &gtk::CssProvider, config: &crate::config::AppearanceConfig) {
     let css = format!("
         textview {{
@@ -98,6 +119,7 @@ impl App {
             preview_visible: false,
             preview_color_scheme: 0,
             css_provider,
+            recents_menu: None,
         }));
 
         setup_accels(app, &config);
@@ -196,6 +218,13 @@ impl App {
         menu_model.append(Some("New File"), Some("app.new"));
         menu_model.append(Some("Save As..."), Some("app.save-as"));
 
+        // Recent files submenu (rebuilt whenever a file is opened)
+        let recents_menu = gio::Menu::new();
+        let recents_section = gio::Menu::new();
+        let recents_submenu_item = gio::MenuItem::new_submenu(Some("Open Recent"), &recents_menu);
+        recents_section.append_item(&recents_submenu_item);
+        menu_model.append_section(None, &recents_section);
+
         let view_section = gio::Menu::new();
         view_section.append(Some("Word Wrap"), Some("app.word-wrap"));
         menu_model.append_section(None, &view_section);
@@ -205,6 +234,24 @@ impl App {
         menu_model.append_section(None, &section);
 
         menu_button.set_menu_model(Some(&menu_model));
+
+        // Populate recents_menu from current config and store in state
+        {
+            let recent = config.recent_files.clone();
+            for path in recent.iter().take(3) {
+                let label = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(path);
+                let item = gio::MenuItem::new(Some(label), None);
+                item.set_action_and_target_value(
+                    Some("app.open-recent"),
+                    Some(&path.to_variant()),
+                );
+                recents_menu.append_item(&item);
+            }
+        }
+        state.borrow_mut().recents_menu = Some(recents_menu);
 
         // Toolbar (Adaptive)
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -577,22 +624,21 @@ impl App {
                 if let Ok(file) = res {
                     if let Some(path) = file.path() {
                         if let Ok(content) = std::fs::read_to_string(&path) {
-                            // Save the directory for next time
-                            if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+                            {
                                 let mut s = state.borrow_mut();
-                                s.config.appearance.last_open_dir = dir.to_string();
-                                let mut disk_cfg = crate::config::get_global_config_path()
-                                    .and_then(|p| std::fs::read_to_string(p).ok())
-                                    .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
-                                    .unwrap_or_default();
-                                disk_cfg.appearance.last_open_dir = dir.to_string();
-                                let _ = crate::config::save_global_config(&disk_cfg);
+                                if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+                                    s.config.appearance.last_open_dir = dir.to_string();
+                                }
                                 s.current_file = Some(path.clone());
                                 s.is_dirty = false;
+                                if let Some(path_str) = path.to_str() {
+                                    crate::config::push_recent_file(&mut s.config, path_str);
+                                    let _ = crate::config::save_global_config(&s.config);
+                                }
                             }
+                            rebuild_recents_menu(&state);
                             buffer.set_text(&content);
                             window_inner.set_title(Some(&format!("SFMDE - {}", path.display())));
-
                             let is_smd = path.extension()
                                 .and_then(|e| e.to_str())
                                 .map(|s| s == "smd")
@@ -798,6 +844,36 @@ impl App {
         });
         app.add_action(&action_word_wrap);
 
+        // Open Recent action — parameter is the file path string
+        let action_open_recent = gio::SimpleAction::new(
+            "open-recent",
+            Some(&String::static_variant_type()),
+        );
+        let state_or_clone = state.clone();
+        let buffer_or_clone = buffer.clone();
+        let window_or_clone = window.clone();
+        let toggle_or_clone = toggle_preview_btn.clone();
+        action_open_recent.connect_activate(move |_, param| {
+            if let Some(path_str) = param.and_then(|v| v.get::<String>()) {
+                let path = std::path::PathBuf::from(&path_str);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let is_smd = path.extension().and_then(|e| e.to_str()).map(|e| e == "smd").unwrap_or(false);
+                    {
+                        let mut s = state_or_clone.borrow_mut();
+                        s.current_file = Some(path.clone());
+                        s.is_dirty = false;
+                        if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+                            s.config.appearance.last_open_dir = dir.to_string();
+                        }
+                    }
+                    buffer_or_clone.set_text(&content);
+                    window_or_clone.set_title(Some(&format!("SFMDE - {}", path.display())));
+                    toggle_or_clone.set_active(is_smd);
+                }
+            }
+        });
+        app.add_action(&action_open_recent);
+
         let action_about = gio::SimpleAction::new("about", None);
         let window_ab_clone = window.clone();
         action_about.connect_activate(move |_, _| {
@@ -905,17 +981,16 @@ impl App {
                 s.is_dirty = false;
                 if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
                     s.config.appearance.last_open_dir = dir.to_string();
-                    let mut disk_cfg = crate::config::get_global_config_path()
-                        .and_then(|p| std::fs::read_to_string(p).ok())
-                        .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
-                        .unwrap_or_default();
-                    disk_cfg.appearance.last_open_dir = dir.to_string();
-                    let _ = crate::config::save_global_config(&disk_cfg);
+                }
+                if let Some(path_str) = path.to_str() {
+                    crate::config::push_recent_file(&mut s.config, path_str);
+                    let _ = crate::config::save_global_config(&s.config);
                 }
                 if let Some(toggle) = &s.preview_toggle {
                     toggle.set_active(is_smd);
                 }
             }
+            rebuild_recents_menu(&self.state);
             let buffer = self.editor.buffer()
                 .downcast::<source::Buffer>()
                 .unwrap();

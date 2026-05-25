@@ -33,7 +33,10 @@ pub struct AppState {
     pub preview_visible: bool,
     pub preview_color_scheme: i32, // 0: System, 1: Light, 2: Dark
     pub css_provider: gtk::CssProvider,
+    pub recents_menu: Option<gio::Menu>,
 }
+
+use gtk4::gio;
 
 #[allow(dead_code)]
 pub struct App {

@@ -278,12 +278,14 @@ impl Default for AppearanceConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Config {
     pub version: String,
     pub history_length: usize,
     pub formatters: FormatterConfig,
     pub hotkeys: HotkeysConfig,
     pub appearance: AppearanceConfig,
+    pub recent_files: Vec<String>,
 }
 
 impl Default for Config {
@@ -294,8 +296,15 @@ impl Default for Config {
             formatters: FormatterConfig::default(),
             hotkeys: HotkeysConfig::default(),
             appearance: AppearanceConfig::default(),
+            recent_files: Vec::new(),
         }
     }
+}
+
+pub fn push_recent_file(config: &mut Config, path: &str) {
+    config.recent_files.retain(|p| p != path);
+    config.recent_files.insert(0, path.to_string());
+    config.recent_files.truncate(3);
 }
 
 pub fn get_global_config_path() -> Option<PathBuf> {
