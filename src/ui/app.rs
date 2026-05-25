@@ -191,11 +191,15 @@ impl App {
         let menu_model = gio::Menu::new();
         menu_model.append(Some("New File"), Some("app.new"));
         menu_model.append(Some("Save As..."), Some("app.save-as"));
-        
+
+        let view_section = gio::Menu::new();
+        view_section.append(Some("Word Wrap"), Some("app.word-wrap"));
+        menu_model.append_section(None, &view_section);
+
         let section = gio::Menu::new();
         section.append(Some("About SFMDE"), Some("app.about"));
         menu_model.append_section(None, &section);
-        
+
         menu_button.set_menu_model(Some(&menu_model));
 
         // Toolbar (Adaptive)
@@ -761,6 +765,29 @@ impl App {
             apply_markup(&buffer_s_clone, &symbol);
         });
         app.add_action(&action_strikethrough);
+
+        let word_wrap_init = state.borrow().config.appearance.word_wrap;
+        let action_word_wrap = gio::SimpleAction::new_stateful(
+            "word-wrap",
+            None,
+            &word_wrap_init.to_variant(),
+        );
+        let state_ww_clone = state.clone();
+        action_word_wrap.connect_activate(move |action, _| {
+            let new_val = !action.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
+            action.set_state(&new_val.to_variant());
+            let mut s = state_ww_clone.borrow_mut();
+            s.config.appearance.word_wrap = new_val;
+            let _ = crate::config::save_global_config(&s.config);
+            if let Some(view) = &s.editor_view {
+                view.set_wrap_mode(if new_val {
+                    gtk4::WrapMode::WordChar
+                } else {
+                    gtk4::WrapMode::None
+                });
+            }
+        });
+        app.add_action(&action_word_wrap);
 
         let action_about = gio::SimpleAction::new("about", None);
         let window_ab_clone = window.clone();
