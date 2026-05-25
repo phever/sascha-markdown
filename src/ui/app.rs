@@ -32,8 +32,15 @@ pub fn apply_appearance(provider: &gtk::CssProvider, config: &crate::config::App
             min-width: {}px;
             min-height: {}px;
         }}
-    ", 
-        config.editor_font_family, 
+        .dialog-border {{
+            outline: 2px solid rgba(0,0,0,0.35);
+            outline-offset: -2px;
+        }}
+        @media (prefers-color-scheme: dark) {{
+            .dialog-border {{ outline-color: rgba(0,0,0,0.65); }}
+        }}
+    ",
+        config.editor_font_family,
         config.editor_font_size,
         if config.editor_bg_color.is_empty() { String::new() } else { format!("background-color: {};", config.editor_bg_color) },
         if config.editor_fg_color.is_empty() { String::new() } else { format!("color: {};", config.editor_fg_color) },
@@ -278,25 +285,8 @@ impl App {
             }
         };
 
-        // Load custom CSS
-        let css = if let Some(css_path) = crate::config::get_style_css_path() {
-            std::fs::read_to_string(css_path).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let final_css = format!(
-            "{}\n\
-            .dialog-border {{\
-                border: 2px solid alpha(black, 0.35);\
-                border-radius: 12px;\
-                padding: 16px;\
-            }}\n\
-            :root:dark .dialog-border, .dark .dialog-border {{\
-                border-color: alpha(black, 0.6);\
-            }}",
-            css
-        );
-        state.borrow().css_provider.load_from_data(&final_css);
+        // Reload appearance CSS (includes .dialog-border) now that state is built
+        apply_appearance(&state.borrow().css_provider, &config.appearance);
         
         update_scheme(style_manager.is_dark());
         style_manager.connect_dark_notify(move |sm| {
