@@ -272,7 +272,7 @@ impl Default for AppearanceConfig {
             show_line_numbers: true,
             highlight_color: "".to_string(),
             last_open_dir: "".to_string(),
-            local_only: false,
+            local_only: true,
         }
     }
 }

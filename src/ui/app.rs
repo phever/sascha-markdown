@@ -126,18 +126,18 @@ impl App {
         let header = adw::HeaderBar::new();
         main_box.append(&header);
 
-        // Navigation
-        let nav_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        nav_box.add_css_class("linked");
-        header.pack_start(&nav_box);
+        // Undo/Redo (left side, where nav was)
+        let undo_redo_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        undo_redo_box.add_css_class("linked");
+        header.pack_start(&undo_redo_box);
 
-        let back_btn = gtk::Button::from_icon_name("go-previous-symbolic");
-        back_btn.set_tooltip_text(Some("Back"));
-        nav_box.append(&back_btn);
+        let undo_btn = gtk::Button::from_icon_name("edit-undo-symbolic");
+        undo_btn.set_tooltip_text(Some("Undo"));
+        undo_redo_box.append(&undo_btn);
 
-        let forward_btn = gtk::Button::from_icon_name("go-next-symbolic");
-        forward_btn.set_tooltip_text(Some("Forward"));
-        nav_box.append(&forward_btn);
+        let redo_btn = gtk::Button::from_icon_name("edit-redo-symbolic");
+        redo_btn.set_tooltip_text(Some("Redo"));
+        undo_redo_box.append(&redo_btn);
 
         // File buttons
         let new_btn = gtk::Button::from_icon_name("document-new-symbolic");
@@ -150,18 +150,13 @@ impl App {
         let save_btn = gtk::Button::with_label("Save");
         header.pack_start(&save_btn);
 
-        // Undo/Redo
-        let undo_redo_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        undo_redo_box.add_css_class("linked");
-        header.pack_end(&undo_redo_box);
-
-        let undo_btn = gtk::Button::from_icon_name("edit-undo-symbolic");
-        undo_btn.set_tooltip_text(Some("Undo"));
-        undo_redo_box.append(&undo_btn);
-
-        let redo_btn = gtk::Button::from_icon_name("edit-redo-symbolic");
-        redo_btn.set_tooltip_text(Some("Redo"));
-        undo_redo_box.append(&redo_btn);
+        // Local-Only toggle (right side)
+        let local_only_btn = gtk::ToggleButton::builder()
+            .icon_name("network-offline-symbolic")
+            .active(config.appearance.local_only)
+            .tooltip_text("Local-Only Mode: block external network requests in preview")
+            .build();
+        header.pack_end(&local_only_btn);
 
         let settings_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
         settings_btn.set_tooltip_text(Some("Settings"));
@@ -652,83 +647,19 @@ impl App {
             }
         });
 
-        // Navigation actions
-        let state_b_clone = state.clone();
-        let buffer_b_clone = buffer.clone();
-        let window_b_clone = window.clone();
-        let toggle_p_b_clone = toggle_preview_btn.clone();
-        back_btn.connect_clicked(move |_| {
-            let mut s = state_b_clone.borrow_mut();
-            if s.nav_index > 0 {
-                s.nav_index -= 1;
-                s.is_navigating = true;
-                let nav = match s.nav_history.get(s.nav_index).cloned() {
-                    Some(n) => n,
-                    None => { s.is_navigating = false; return; }
-                };
-                
-                if nav.file != s.current_file {
-                    if let Some(path) = &nav.file {
-                        if let Ok(content) = std::fs::read_to_string(path) {
-                            s.current_file = Some(path.clone());
-                            buffer_b_clone.set_text(&content);
-                            window_b_clone.set_title(Some(&format!("SFMDE - {}", path.display())));
-                            
-                            let is_smd = path.extension()
-                                .and_then(|e| e.to_str())
-                                .map(|e| e == "smd")
-                                .unwrap_or(false);
-                            toggle_p_b_clone.set_active(is_smd);
-                        }
-                    } else {
-                        s.current_file = None;
-                        buffer_b_clone.set_text("");
-                        window_b_clone.set_title(Some("SFMDE - New File"));
-                        toggle_p_b_clone.set_active(false);
-                    }
-                }
-                buffer_b_clone.place_cursor(&buffer_b_clone.iter_at_offset(nav.cursor_offset));
-                s.is_navigating = false;
+        // Local-Only toggle action
+        let state_lo_clone = state.clone();
+        let buffer_lo_clone = buffer.clone();
+        local_only_btn.connect_toggled(move |btn| {
+            let active = btn.is_active();
+            {
+                let mut s = state_lo_clone.borrow_mut();
+                s.config.appearance.local_only = active;
+                let _ = crate::config::save_global_config(&s.config);
             }
-        });
-
-        let state_f_clone = state.clone();
-        let buffer_f_clone = buffer.clone();
-        let window_f_clone = window.clone();
-        let toggle_p_f_clone = toggle_preview_btn.clone();
-        forward_btn.connect_clicked(move |_| {
-            let mut s = state_f_clone.borrow_mut();
-            if s.nav_index + 1 < s.nav_history.len() {
-                s.nav_index += 1;
-                s.is_navigating = true;
-                let nav = match s.nav_history.get(s.nav_index).cloned() {
-                    Some(n) => n,
-                    None => { s.is_navigating = false; return; }
-                };
-                
-                if nav.file != s.current_file {
-                    if let Some(path) = &nav.file {
-                        if let Ok(content) = std::fs::read_to_string(path) {
-                            s.current_file = Some(path.clone());
-                            buffer_f_clone.set_text(&content);
-                            window_f_clone.set_title(Some(&format!("SFMDE - {}", path.display())));
-                            
-                            let is_smd = path.extension()
-                                .and_then(|e| e.to_str())
-                                .map(|e| e == "smd")
-                                .unwrap_or(false);
-                            toggle_p_f_clone.set_active(is_smd);
-                        }
-                    } else {
-                        s.current_file = None;
-                        buffer_f_clone.set_text("");
-                        window_f_clone.set_title(Some("SFMDE - New File"));
-                        toggle_p_f_clone.set_active(false);
-                    }
-                }
-                buffer_f_clone.place_cursor(&buffer_f_clone.iter_at_offset(nav.cursor_offset));
-                s.is_navigating = false;
-            }
+            // Trigger preview re-render so CSP tag is added/removed
+            use glib::prelude::*;
+            buffer_lo_clone.emit_by_name::<()>("changed", &[]);
         });
 
         // Undo/Redo actions
