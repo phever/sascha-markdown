@@ -139,16 +139,22 @@ fn show_welcome_dialog(parent: &adw::ApplicationWindow) {
         .transient_for(parent)
         .default_width(500)
         .build();
+    window.add_css_class("dialog-border");
 
     let status_page = adw::StatusPage::builder()
         .icon_name("com.sascha.SFMDE")
         .title("Welcome to SFMDE")
         .description(format!("Version {}\n\nSascha Flavored Markdown (SFM) is a highly customizable superset of Markdown.\n\nEvery formatting symbol—from bold to spoilers—can be redefined in your configuration file. This allows you to tailor the editor to your preferred syntax while maintaining live previews and standard Markdown features.\n\nCheck your configuration at ~/.config/sascha-flavored-markdown/sfmde.config to start customizing.", env!("CARGO_PKG_VERSION")))
         .build();
+    status_page.set_margin_top(16);
+    status_page.set_margin_bottom(24);
+    status_page.set_margin_start(16);
+    status_page.set_margin_end(16);
 
     let btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     btn_box.set_halign(gtk::Align::Center);
-    btn_box.set_margin_top(24);
+    btn_box.set_margin_top(16);
+    btn_box.set_margin_bottom(8);
 
     let install_btn = gtk::Button::builder()
         .label("Install Locally")
@@ -176,6 +182,7 @@ fn show_welcome_dialog(parent: &adw::ApplicationWindow) {
                     .heading("Installed")
                     .body("SFMDE has been installed to ~/.local/bin, a desktop entry created, and the .smd MIME type registered. You may now double-click .smd files to open them.")
                     .build();
+                success_dialog.add_css_class("dialog-border");
 
                 let icon = gtk::Image::from_icon_name("com.sascha.SFMDE");
                 icon.set_pixel_size(64);
@@ -189,6 +196,7 @@ fn show_welcome_dialog(parent: &adw::ApplicationWindow) {
                     .heading("Installation Failed")
                     .body(format!("Could not install SFMDE: {}", e))
                     .build();
+                error_dialog.add_css_class("dialog-border");
 
                 let icon = gtk::Image::from_icon_name("com.sascha.SFMDE");
                 icon.set_pixel_size(64);

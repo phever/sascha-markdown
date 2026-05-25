@@ -285,7 +285,18 @@ impl App {
         } else {
             String::new()
         };
-        let final_css = format!("{}\n.dialog-border {{ border: 2px solid @accent_color; border-radius: 10px; }}", css);
+        let final_css = format!(
+            "{}\n\
+            .dialog-border {{\
+                border: 2px solid alpha(black, 0.35);\
+                border-radius: 12px;\
+                padding: 16px;\
+            }}\n\
+            :root:dark .dialog-border, .dark .dialog-border {{\
+                border-color: alpha(black, 0.6);\
+            }}",
+            css
+        );
         state.borrow().css_provider.load_from_data(&final_css);
         
         update_scheme(style_manager.is_dark());
@@ -849,6 +860,7 @@ impl App {
                 .version(env!("CARGO_PKG_VERSION"))
                 .comments("A highly configurable Markdown editor with GTK4 and custom SFM support.")
                 .build();
+            about.add_css_class("dialog-border");
             about.present(Some(&window_ab_clone));
         });
         app.add_action(&action_about);
@@ -870,6 +882,7 @@ impl App {
                 Some("Unsaved Changes"),
                 Some("You have unsaved changes. Do you want to discard them?"),
             );
+            dialog.add_css_class("dialog-border");
             dialog.add_response("cancel", "Cancel");
             dialog.add_response("discard", "Discard");
             dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);

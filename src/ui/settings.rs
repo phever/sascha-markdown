@@ -18,6 +18,7 @@ pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<A
         .transient_for(parent)
         .modal(true)
         .build();
+    dialog.add_css_class("dialog-border");
 
     let user_page = adw::PreferencesPage::new();
     user_page.set_title("User");
