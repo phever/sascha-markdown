@@ -1,5 +1,5 @@
 use crate::config::Config;
-use pulldown_cmark::{html, Options, Parser, Event, Tag};
+use pulldown_cmark::{html, Options, Parser, Event, Tag, TagEnd};
 
 pub fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
@@ -398,11 +398,99 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
 
 /// Renders SFM-flavoured markdown to an HTML body fragment.
 /// Wrap the result with `build_html_document` before loading into a WebView.
+/// Block-level tags that get a `data-src-line` attribute injected.
+fn is_block_open(tag: &Tag) -> bool {
+    matches!(
+        tag,
+        Tag::Paragraph
+            | Tag::Heading { .. }
+            | Tag::BlockQuote(_)
+            | Tag::CodeBlock(_)
+            | Tag::List(_)
+            | Tag::Item
+            | Tag::Table(_)
+    )
+}
+
+fn tag_html_open(tag: &Tag, src_line: u32) -> String {
+    match tag {
+        Tag::Paragraph => format!(r#"<p data-src-line="{src_line}">"#),
+        Tag::Heading { level, .. } => format!(r#"<{level} data-src-line="{src_line}">"#),
+        Tag::BlockQuote(_) => format!(r#"<blockquote data-src-line="{src_line}">"#),
+        Tag::CodeBlock(_) => format!(r#"<pre data-src-line="{src_line}"><code>"#),
+        Tag::List(Some(start)) => format!(r#"<ol start="{start}" data-src-line="{src_line}">"#),
+        Tag::List(None) => format!(r#"<ul data-src-line="{src_line}">"#),
+        Tag::Item => format!(r#"<li data-src-line="{src_line}">"#),
+        Tag::Table(_) => format!(r#"<table data-src-line="{src_line}">"#),
+        _ => String::new(),
+    }
+}
+
+fn tag_html_close(end: &TagEnd) -> &'static str {
+    match end {
+        TagEnd::Paragraph => "</p>",
+        TagEnd::Heading(_) => "",   // handled specially below
+        TagEnd::BlockQuote => "</blockquote>",
+        TagEnd::CodeBlock => "</code></pre>",
+        TagEnd::List(true) => "</ol>",
+        TagEnd::List(false) => "</ul>",
+        TagEnd::Item => "</li>",
+        TagEnd::Table => "</table>",
+        _ => "",
+    }
+}
+
 pub fn render_to_html(text: &str, config: &Config) -> String {
     let preprocessed = preprocess_smd(text, config);
     let options = Options::all();
+
+    // Build a byte→line map so we can tag each block with its source line.
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(preprocessed.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let byte_to_line = |byte: usize| -> u32 {
+        line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
+    };
+
+    let parser = Parser::new_ext(&preprocessed, options).into_offset_iter();
     let mut body = String::new();
-    html::push_html(&mut body, Parser::new_ext(&preprocessed, options));
+    let mut heading_level: Option<pulldown_cmark::HeadingLevel> = None;
+
+    for (event, range) in parser {
+        match event {
+            Event::Start(ref tag) if is_block_open(tag) => {
+                let line = byte_to_line(range.start);
+                if let Tag::Heading { level, .. } = tag {
+                    heading_level = Some(*level);
+                    body.push_str(&format!(r#"<{level} data-src-line="{line}">"#));
+                } else {
+                    body.push_str(&tag_html_open(tag, line));
+                }
+            }
+            Event::End(TagEnd::Heading(level)) => {
+                body.push_str(&format!("</{level}>"));
+                heading_level = None;
+            }
+            Event::End(ref end) => {
+                let close = tag_html_close(end);
+                if !close.is_empty() {
+                    body.push_str(close);
+                } else {
+                    // Fall back to pulldown-cmark for everything else
+                    let mut tmp = String::new();
+                    html::push_html(&mut tmp, std::iter::once(Event::End(end.clone())));
+                    body.push_str(&tmp);
+                }
+            }
+            other => {
+                let mut tmp = String::new();
+                html::push_html(&mut tmp, std::iter::once(other));
+                body.push_str(&tmp);
+            }
+        }
+    }
+
+    let _ = heading_level; // suppress unused warning
     body
 }
 
@@ -496,6 +584,11 @@ html.dark-mode details {{ border-color: #555; }}
 {css}
 .error {{ text-decoration: underline wavy red; }}
 .warning {{ color: red; font-weight: bold; border: 1px solid red; padding: 4px 8px; border-radius: 4px; margin-bottom: 1em; display: inline-block; }}
+[data-src-line].sfmde-cursor-line {{
+    outline: 2px solid rgba(100,140,255,0.55);
+    outline-offset: 2px;
+    border-radius: 3px;
+}}
 </style>
 <script>
 (function() {{
@@ -508,6 +601,24 @@ html.dark-mode details {{ border-color: #555; }}
     window.addEventListener('scroll', function() {{
         sessionStorage.setItem('sfmde_scrollY', window.scrollY);
     }}, {{ passive: true }});
+
+    window._sfmde_setCursor = function(line) {{
+        var prev = document.querySelector('.sfmde-cursor-line');
+        if (prev) prev.classList.remove('sfmde-cursor-line');
+        var all = Array.from(document.querySelectorAll('[data-src-line]'));
+        if (!all.length) return;
+        var best = all[0];
+        for (var i = 0; i < all.length; i++) {{
+            var l = parseInt(all[i].getAttribute('data-src-line'), 10);
+            if (l <= line) best = all[i]; else break;
+        }}
+        best.classList.add('sfmde-cursor-line');
+    }};
+
+    window._sfmde_syncScroll = function(fraction) {{
+        var max = document.documentElement.scrollHeight - window.innerHeight;
+        if (max > 0) window.scrollTo(0, fraction * max);
+    }};
 }})();
 </script>
 </head>

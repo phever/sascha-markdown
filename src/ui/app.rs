@@ -328,18 +328,24 @@ impl App {
             if decision_type == PolicyDecisionType::NavigationAction {
                 if let Ok(nav_decision) = decision.clone().downcast::<NavigationPolicyDecision>() {
                     if let Some(action) = nav_decision.navigation_action() {
-                        let is_link_click = action.navigation_type() == NavigationType::LinkClicked;
+                        if action.navigation_type() == NavigationType::LinkClicked {
+                            // Never navigate the preview pane — open all links externally.
+                            let uri = action.request()
+                                .and_then(|r| r.uri())
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+                            decision.ignore();
+                            if !uri.is_empty() {
+                                let _ = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>);
+                            }
+                            return true;
+                        }
+                        // Block non-file:// navigation (e.g. form submits, redirects) when local_only
                         let uri = action.request()
                             .and_then(|r| r.uri())
                             .map(|s| s.to_string())
                             .unwrap_or_default();
                         let is_external = !uri.starts_with("file://") && !uri.starts_with("about:");
-                        if is_link_click && is_external {
-                            // Open external links in the system browser
-                            decision.ignore();
-                            let _ = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>);
-                            return true;
-                        }
                         if local_only_init && is_external {
                             decision.ignore();
                             return true;
@@ -507,10 +513,16 @@ impl App {
         state.borrow_mut().cursor_label = Some(cursor_label.clone());
 
         let buffer_state_clone = state.clone();
+        let preview_cursor_clone = preview.clone();
         buffer.connect_cursor_position_notify(move |buf| {
             let offset = buf.cursor_position();
             let iter = buf.iter_at_offset(offset);
-            cursor_label.set_text(&format!("Line: {}, Col: {}", iter.line() + 1, iter.line_offset() + 1));
+            let line = iter.line() + 1;
+            cursor_label.set_text(&format!("Line: {}, Col: {}", line, iter.line_offset() + 1));
+
+            // Update cursor indicator in preview
+            let js = format!("if(window._sfmde_setCursor)window._sfmde_setCursor({line});");
+            preview_cursor_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
 
             // Record navigation history
             let mut s = buffer_state_clone.borrow_mut();
@@ -534,6 +546,16 @@ impl App {
                     s.nav_index = s.nav_history.len().saturating_sub(1);
                 }
             }
+        });
+
+        // Editor scroll → preview scroll sync
+        let preview_scroll_clone = preview.clone();
+        editor_scroll.vadjustment().connect_value_changed(move |adj| {
+            let upper = adj.upper() - adj.page_size();
+            if upper <= 0.0 { return; }
+            let fraction = (adj.value() / upper).clamp(0.0, 1.0);
+            let js = format!("if(window._sfmde_syncScroll)window._sfmde_syncScroll({fraction:.4});");
+            preview_scroll_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
         });
 
         // Setup File Callbacks
