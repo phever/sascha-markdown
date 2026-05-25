@@ -135,53 +135,6 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     font_row.add_suffix(&font_btn);
     group.add(&font_row);
 
-    // Bg Color
-    let bg_color_row = adw::ActionRow::new();
-    bg_color_row.set_title("Background Color");
-    let bg_color_entry = gtk::Entry::new();
-    bg_color_entry.set_text(&config.appearance.editor_bg_color);
-    bg_color_entry.set_valign(gtk::Align::Center);
-    bg_color_entry.set_placeholder_text(Some("e.g. #333333"));
-    bg_color_row.add_suffix(&bg_color_entry);
-    group.add(&bg_color_row);
-
-    // Fg Color
-    let fg_color_row = adw::ActionRow::new();
-    fg_color_row.set_title("Foreground Color");
-    let fg_color_entry = gtk::Entry::new();
-    fg_color_entry.set_text(&config.appearance.editor_fg_color);
-    fg_color_entry.set_valign(gtk::Align::Center);
-    fg_color_entry.set_placeholder_text(Some("e.g. #FFFFFF"));
-    fg_color_row.add_suffix(&fg_color_entry);
-    group.add(&fg_color_row);
-
-    // Icon Size
-    let icon_size_row = adw::ActionRow::new();
-    icon_size_row.set_title("Menu Icon Size");
-    let icon_size_spin = gtk::SpinButton::with_range(8.0, 64.0, 1.0);
-    icon_size_spin.set_value(config.appearance.menu_icon_size as f64);
-    icon_size_spin.set_valign(gtk::Align::Center);
-    icon_size_row.add_suffix(&icon_size_spin);
-    group.add(&icon_size_row);
-
-    // Splitbar Color
-    let split_color_row = adw::ActionRow::new();
-    split_color_row.set_title("Split Bar Color");
-    let split_color_entry = gtk::Entry::new();
-    split_color_entry.set_text(&config.appearance.splitbar_color);
-    split_color_entry.set_valign(gtk::Align::Center);
-    split_color_row.add_suffix(&split_color_entry);
-    group.add(&split_color_row);
-
-    // Splitbar Width
-    let split_width_row = adw::ActionRow::new();
-    split_width_row.set_title("Split Bar Width (px)");
-    let split_width_spin = gtk::SpinButton::with_range(1.0, 20.0, 1.0);
-    split_width_spin.set_value(config.appearance.splitbar_width as f64);
-    split_width_spin.set_valign(gtk::Align::Center);
-    split_width_row.add_suffix(&split_width_spin);
-    group.add(&split_width_row);
-
     // Word Wrap
     let wrap_row = adw::ActionRow::new();
     wrap_row.set_title("Word Wrap");
@@ -212,6 +165,36 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     linecol_row.add_suffix(&linecol_switch);
     group.add(&linecol_row);
 
+    // Local-Only Mode
+    let local_row = adw::ActionRow::new();
+    local_row.set_title("Local-Only Mode");
+    local_row.set_subtitle("Block all external (non-file://) network requests in preview");
+    let local_switch = gtk::Switch::new();
+    local_switch.set_active(config.appearance.local_only);
+    local_switch.set_valign(gtk::Align::Center);
+    local_row.add_suffix(&local_switch);
+    group.add(&local_row);
+
+    // Bg Color
+    let bg_color_row = adw::ActionRow::new();
+    bg_color_row.set_title("Background Color");
+    let bg_color_entry = gtk::Entry::new();
+    bg_color_entry.set_text(&config.appearance.editor_bg_color);
+    bg_color_entry.set_valign(gtk::Align::Center);
+    bg_color_entry.set_placeholder_text(Some("e.g. #333333"));
+    bg_color_row.add_suffix(&bg_color_entry);
+    group.add(&bg_color_row);
+
+    // Fg Color
+    let fg_color_row = adw::ActionRow::new();
+    fg_color_row.set_title("Foreground Color");
+    let fg_color_entry = gtk::Entry::new();
+    fg_color_entry.set_text(&config.appearance.editor_fg_color);
+    fg_color_entry.set_valign(gtk::Align::Center);
+    fg_color_entry.set_placeholder_text(Some("e.g. #FFFFFF"));
+    fg_color_row.add_suffix(&fg_color_entry);
+    group.add(&fg_color_row);
+
     // Highlight Color
     let hl_row = adw::ActionRow::new();
     hl_row.set_title("Highlight Color");
@@ -223,15 +206,32 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
     hl_row.add_suffix(&hl_entry);
     group.add(&hl_row);
 
-    // Local-Only Mode
-    let local_row = adw::ActionRow::new();
-    local_row.set_title("Local-Only Mode");
-    local_row.set_subtitle("Block all external (non-file://) network requests in preview");
-    let local_switch = gtk::Switch::new();
-    local_switch.set_active(config.appearance.local_only);
-    local_switch.set_valign(gtk::Align::Center);
-    local_row.add_suffix(&local_switch);
-    group.add(&local_row);
+    // Icon Size
+    let icon_size_row = adw::ActionRow::new();
+    icon_size_row.set_title("Menu Icon Size");
+    let icon_size_spin = gtk::SpinButton::with_range(8.0, 64.0, 1.0);
+    icon_size_spin.set_value(config.appearance.menu_icon_size as f64);
+    icon_size_spin.set_valign(gtk::Align::Center);
+    icon_size_row.add_suffix(&icon_size_spin);
+    group.add(&icon_size_row);
+
+    // Splitbar Color
+    let split_color_row = adw::ActionRow::new();
+    split_color_row.set_title("Split Bar Color");
+    let split_color_entry = gtk::Entry::new();
+    split_color_entry.set_text(&config.appearance.splitbar_color);
+    split_color_entry.set_valign(gtk::Align::Center);
+    split_color_row.add_suffix(&split_color_entry);
+    group.add(&split_color_row);
+
+    // Splitbar Width
+    let split_width_row = adw::ActionRow::new();
+    split_width_row.set_title("Split Bar Width (px)");
+    let split_width_spin = gtk::SpinButton::with_range(1.0, 20.0, 1.0);
+    split_width_spin.set_value(config.appearance.splitbar_width as f64);
+    split_width_spin.set_valign(gtk::Align::Center);
+    split_width_row.add_suffix(&split_width_spin);
+    group.add(&split_width_row);
 
     let state_clone = state.clone();
     let font_btn_clone = font_btn.clone();
