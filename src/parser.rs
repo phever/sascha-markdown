@@ -386,11 +386,9 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
         }
     }
 
-    // Unclosed tags: backtrack and emit raw text as an error span.
-    while let Some((_, _, _, output_start, char_start)) = stack.pop() {
-        output.truncate(output_start);
-        let raw: String = chars[char_start..].iter().collect();
-        output.push_str(&format!(r#"<span class="error">{}</span>"#, xml_escape(&raw)));
+    // Unclosed tags: just close them so prior correctly-rendered content is preserved.
+    while let Some((_, _, html_close, _, _)) = stack.pop() {
+        output.push_str(&html_close);
     }
 
     output
@@ -442,38 +440,24 @@ fn tag_html_close(end: &TagEnd) -> &'static str {
 
 pub fn render_to_html(text: &str, config: &Config) -> String {
     let options = Options::all();
-
-    // First pass: collect block line numbers from the ORIGINAL text (before preprocessing
-    // can shift line counts by consuming header newlines in named_quote / collapse).
-    let orig_line_starts: Vec<usize> = std::iter::once(0)
-        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-        .collect();
-    let orig_byte_to_line = |byte: usize| -> u32 {
-        orig_line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
-    };
-    let mut orig_block_lines: Vec<u32> = Vec::new();
-    for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
-        if let Event::Start(ref tag) = event {
-            if is_block_open(tag) {
-                orig_block_lines.push(orig_byte_to_line(range.start));
-            }
-        }
-    }
-
-    // Second pass: render the preprocessed text, assigning data-src-line from orig_block_lines
-    // in block-index order (preprocessing preserves block order).
     let preprocessed = preprocess_smd(text, config);
+
+    // Map byte offsets in the preprocessed text to 1-based line numbers.
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(preprocessed.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+    let byte_to_line = |byte: usize| -> u32 {
+        line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
+    };
+
     let parser = Parser::new_ext(&preprocessed, options).into_offset_iter();
     let mut body = String::new();
     let mut heading_level: Option<pulldown_cmark::HeadingLevel> = None;
-    let mut block_idx: usize = 0;
 
-    for (event, _range) in parser {
+    for (event, range) in parser {
         match event {
             Event::Start(ref tag) if is_block_open(tag) => {
-                let line = orig_block_lines.get(block_idx).copied()
-                    .unwrap_or(block_idx as u32 + 1);
-                block_idx += 1;
+                let line = byte_to_line(range.start);
                 if let Tag::Heading { level, .. } = tag {
                     heading_level = Some(*level);
                     body.push_str(&format!(r#"<{level} data-src-line="{line}">"#));
@@ -490,7 +474,6 @@ pub fn render_to_html(text: &str, config: &Config) -> String {
                 if !close.is_empty() {
                     body.push_str(close);
                 } else {
-                    // Fall back to pulldown-cmark for everything else
                     let mut tmp = String::new();
                     html::push_html(&mut tmp, std::iter::once(Event::End(end.clone())));
                     body.push_str(&tmp);
@@ -504,7 +487,7 @@ pub fn render_to_html(text: &str, config: &Config) -> String {
         }
     }
 
-    let _ = heading_level; // suppress unused warning
+    let _ = heading_level;
     body
 }
 
@@ -599,8 +582,8 @@ html.dark-mode details {{ border-color: #555; }}
 .error {{ text-decoration: underline wavy red; }}
 .warning {{ color: red; font-weight: bold; border: 1px solid red; padding: 4px 8px; border-radius: 4px; margin-bottom: 1em; display: inline-block; }}
 span.spoiler {{
-    background-color: rgba(0,0,0,0.85);
-    color: transparent;
+    background-color: #b5bac1;
+    color: #b5bac1;
     border-radius: 3px;
     padding: 0 3px;
     cursor: pointer;
@@ -608,12 +591,10 @@ span.spoiler {{
     transition: background-color 0.2s, color 0.2s;
 }}
 span.spoiler.revealed {{
-    background-color: rgba(0,0,0,0.12);
+    background-color: rgba(79,84,92,0.3);
     color: inherit;
     user-select: text;
 }}
-html.dark-mode span.spoiler {{ background-color: rgba(255,255,255,0.15); }}
-html.dark-mode span.spoiler.revealed {{ background-color: rgba(255,255,255,0.08); }}
 [data-src-line].sfmde-cursor-line {{
     outline: 2px solid rgba(100,140,255,0.55);
     outline-offset: 2px;
@@ -622,15 +603,17 @@ html.dark-mode span.spoiler.revealed {{ background-color: rgba(255,255,255,0.08)
 </style>
 <script>
 (function() {{
-    var saved = sessionStorage.getItem('sfmde_scrollY');
-    if (saved) {{
-        document.addEventListener('DOMContentLoaded', function() {{
-            window.scrollTo(0, parseInt(saved, 10));
-        }});
-    }}
-    window.addEventListener('scroll', function() {{
-        sessionStorage.setItem('sfmde_scrollY', window.scrollY);
-    }}, {{ passive: true }});
+    try {{
+        var saved = sessionStorage.getItem('sfmde_scrollY');
+        if (saved) {{
+            document.addEventListener('DOMContentLoaded', function() {{
+                window.scrollTo(0, parseInt(saved, 10));
+            }});
+        }}
+        window.addEventListener('scroll', function() {{
+            try {{ sessionStorage.setItem('sfmde_scrollY', window.scrollY); }} catch(e) {{}}
+        }}, {{ passive: true }});
+    }} catch(e) {{}}
 
     window._sfmde_setCursor = function(line) {{
         var prev = document.querySelector('.sfmde-cursor-line');

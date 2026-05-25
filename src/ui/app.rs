@@ -7,14 +7,14 @@ use adw::prelude::*;
 use sourceview5 as source;
 use source::prelude::*;
 use webkit6::prelude::*;
-use webkit6::{NavigationPolicyDecision, NavigationType, PolicyDecisionType, WebView};
 use crate::config::Config;
 use std::cell::RefCell;
 use std::rc::Rc;
-use crate::ui::{AppState, NavState, App};
+use crate::ui::{AppState, NavState, TabState, App};
 use crate::ui::markup::apply_markup;
 use crate::ui::toolbar::refresh_toolbar;
 use crate::ui::settings::show_settings_dialog;
+use std::path::PathBuf;
 
 fn rebuild_recents_menu(state: &Rc<RefCell<AppState>>) {
     let s = state.borrow();
@@ -56,6 +56,14 @@ pub fn apply_appearance(provider: &gtk::CssProvider, config: &crate::config::App
         .dialog-border {{
             outline: 2px solid rgba(0,0,0,0.35);
             outline-offset: -2px;
+        }}
+        tabbar {{
+            min-height: 30px;
+        }}
+        tabbar tab {{
+            min-height: 30px;
+            padding-top: 0px;
+            padding-bottom: 0px;
         }}
     ",
         config.editor_font_family,
@@ -103,25 +111,6 @@ impl App {
         }
         apply_appearance(&css_provider, &config.appearance);
 
-        let state = Rc::new(RefCell::new(AppState {
-            current_file: None,
-            config: config.clone(),
-            nav_history: Vec::new(),
-            nav_index: 0,
-            is_navigating: false,
-            is_dirty: false,
-            toolbar: None,
-            buffer: None,
-            editor_view: None,
-            cursor_label: None,
-            preview_toggle: None,
-            editor_visible: true,
-            preview_visible: false,
-            preview_color_scheme: 0,
-            css_provider,
-            recents_menu: None,
-        }));
-
         setup_accels(app, &config);
 
         // Load custom CSS
@@ -159,10 +148,12 @@ impl App {
 
         let undo_btn = gtk::Button::from_icon_name("edit-undo-symbolic");
         undo_btn.set_tooltip_text(Some("Undo"));
+        undo_btn.set_sensitive(false);
         undo_redo_box.append(&undo_btn);
 
         let redo_btn = gtk::Button::from_icon_name("edit-redo-symbolic");
         redo_btn.set_tooltip_text(Some("Redo"));
+        redo_btn.set_sensitive(false);
         undo_redo_box.append(&redo_btn);
 
         // File buttons
@@ -174,6 +165,7 @@ impl App {
         header.pack_start(&open_btn);
 
         let save_btn = gtk::Button::with_label("Save");
+        save_btn.set_sensitive(false);
         header.pack_start(&save_btn);
 
         // Local-Only toggle (right side)
@@ -201,7 +193,6 @@ impl App {
             .tooltip_text("Show/Hide Preview")
             .build();
         header.pack_end(&toggle_preview_btn);
-        state.borrow_mut().preview_toggle = Some(toggle_preview_btn.clone());
 
         let preview_mode_btn = gtk::Button::builder()
             .icon_name("display-brightness-symbolic")
@@ -235,24 +226,6 @@ impl App {
 
         menu_button.set_menu_model(Some(&menu_model));
 
-        // Populate recents_menu from current config and store in state
-        {
-            let recent = config.recent_files.clone();
-            for path in recent.iter().take(3) {
-                let label = std::path::Path::new(path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(path);
-                let item = gio::MenuItem::new(Some(label), None);
-                item.set_action_and_target_value(
-                    Some("app.open-recent"),
-                    Some(&path.to_variant()),
-                );
-                recents_menu.append_item(&item);
-            }
-        }
-        state.borrow_mut().recents_menu = Some(recents_menu);
-
         // Toolbar (Adaptive)
         let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         toolbar.set_hexpand(true);
@@ -260,11 +233,71 @@ impl App {
         toolbar.set_margin_end(10);
         toolbar.set_margin_top(5);
         toolbar.set_margin_bottom(5);
-        
         main_box.append(&toolbar);
-        state.borrow_mut().toolbar = Some(toolbar.clone());
 
-        // Adaptive overflow polling (safe for non-Send types)
+        // Stack to swap between Welcome Screen and Tabbed Editor
+        let main_stack = gtk::Stack::builder()
+            .vexpand(true)
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .build();
+        main_box.append(&main_stack);
+
+        // Child 1: Empty Screen
+        let welcome_page = adw::StatusPage::builder()
+            .icon_name("com.sascha.SFMDE")
+            .title("SFMDE")
+            .description("Sascha Flavored Markdown Editor\n\nNo files open.")
+            .build();
+        
+        let welcome_btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        welcome_btn_box.set_halign(gtk::Align::Center);
+        
+        let welcome_new_btn = gtk::Button::builder()
+            .label("New File")
+            .css_classes(["suggested-action"])
+            .build();
+        let welcome_open_btn = gtk::Button::with_label("Open File...");
+
+        welcome_btn_box.append(&welcome_new_btn);
+        welcome_btn_box.append(&welcome_open_btn);
+        welcome_page.set_child(Some(&welcome_btn_box));
+        main_stack.add_named(&welcome_page, Some("empty"));
+
+        // Child 2: Editor tabbed interface
+        let editor_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let tab_bar = adw::TabBar::new();
+        let tab_view = adw::TabView::new();
+        tab_bar.set_view(Some(&tab_view));
+        editor_box.append(&tab_bar);
+        editor_box.append(&tab_view);
+        tab_view.set_vexpand(true);
+        main_stack.add_named(&editor_box, Some("editor"));
+
+        main_stack.set_visible_child_name("empty");
+
+        // AppState
+        let state = Rc::new(RefCell::new(AppState {
+            config: config.clone(),
+            toolbar: Some(toolbar.clone()),
+            cursor_label: None,
+            preview_toggle: Some(toggle_preview_btn.clone()),
+            editor_toggle: Some(toggle_editor_btn.clone()),
+            undo_btn: Some(undo_btn.clone()),
+            redo_btn: Some(redo_btn.clone()),
+            save_btn: Some(save_btn.clone()),
+            local_only_btn: Some(local_only_btn.clone()),
+            preview_color_scheme: 0,
+            css_provider,
+            recents_menu: Some(recents_menu),
+            tab_view: tab_view.clone(),
+            tab_bar,
+            main_stack,
+            open_tabs: Vec::new(),
+        }));
+
+        rebuild_recents_menu(&state);
+
+        // Adaptive overflow polling
         let state_poll_clone = state.clone();
         let current_count = Rc::new(RefCell::new(0usize));
         let window_poll_clone = window.clone();
@@ -280,143 +313,134 @@ impl App {
             glib::ControlFlow::Continue
         });
 
-        let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
-        paned.set_vexpand(true);
-        main_box.append(&paned);
-
-        // Editor
-        let editor_scroll = gtk::ScrolledWindow::new();
-        // Disable overlay scrolling so the horizontal scrollbar never floats
-        // over the last line of text.
-        editor_scroll.set_overlay_scrolling(false);
-        let editor = source::View::new();
-        editor.set_monospace(true);
-        editor.set_show_line_numbers(config.appearance.show_line_numbers);
-        editor.set_highlight_current_line(true);
-        editor.set_auto_indent(true);
-        editor.set_insert_spaces_instead_of_tabs(true);
-        editor.set_tab_width(4);
-        
-        let buffer = editor.buffer().downcast::<source::Buffer>().unwrap();
-        buffer.set_enable_undo(true);
-        buffer.set_max_undo_levels(state.borrow().config.history_length as u32);
-        state.borrow_mut().buffer = Some(buffer.clone());
-        state.borrow_mut().editor_view = Some(editor.clone());
-
-        if state.borrow().config.appearance.word_wrap {
-            editor.set_wrap_mode(gtk::WrapMode::WordChar);
-        } else {
-            editor.set_wrap_mode(gtk::WrapMode::None);
-        }
-
-        // Sync color scheme with system
-        let scheme_manager = source::StyleSchemeManager::default();
-        let style_manager = adw::StyleManager::default();
-
-        let update_scheme = {
-            let buffer = buffer.clone();
-            let scheme_manager = scheme_manager.clone();
-            move |dark: bool| {
-                let scheme_id = if dark { "adwaita-dark" } else { "adwaita" };
-                if let Some(scheme) = scheme_manager.scheme(scheme_id) {
-                    buffer.set_style_scheme(Some(&scheme));
-                } else {
-                    let fallback = if dark { "classic-dark" } else { "classic" };
-                    if let Some(scheme) = scheme_manager.scheme(fallback) {
-                        buffer.set_style_scheme(Some(&scheme));
-                    }
-                }
-            }
-        };
-
-        // Reload appearance CSS (includes .dialog-border) now that state is built
-        apply_appearance(&state.borrow().css_provider, &config.appearance);
-        
-        update_scheme(style_manager.is_dark());
-        style_manager.connect_dark_notify(move |sm| {
-            update_scheme(sm.is_dark());
+        // Setup File Callbacks
+        let state_new_btn_clone = state.clone();
+        new_btn.connect_clicked(move |_| {
+            App::create_new_tab(&state_new_btn_clone, None);
         });
 
-        editor_scroll.set_child(Some(&editor));
-        paned.set_start_child(Some(&editor_scroll));
-        paned.set_resize_start_child(true);
+        let state_open_btn_clone = state.clone();
+        let window_open_btn_clone = window.clone();
+        open_btn.connect_clicked(move |_| {
+            App::trigger_open_dialog(&state_open_btn_clone, &window_open_btn_clone);
+        });
 
-        // Preview — WebView replaces the old gtk::Label
-        let settings = webkit6::Settings::builder()
-            .allow_file_access_from_file_urls(true)
-            .allow_universal_access_from_file_urls(true)
-            .build();
-        let preview = WebView::builder()
-            .settings(&settings)
-            .build();
-        preview.set_vexpand(true);
-        preview.set_hexpand(true);
-        preview.set_visible(false);
-        paned.set_end_child(Some(&preview));
-        paned.set_resize_end_child(true);
+        let state_save_btn_clone = state.clone();
+        let window_save_btn_clone = window.clone();
+        save_btn.connect_clicked(move |_| {
+            let active_tab = state_save_btn_clone.borrow().get_active_tab();
+            if let Some(tab) = active_tab {
+                let state_inner = state_save_btn_clone.clone();
+                let state_inner_for_cb = state_inner.clone();
+                App::save_tab_with_callback(&state_inner, &tab, &window_save_btn_clone, move |success| {
+                    if success {
+                        App::sync_ui_to_active_tab(&state_inner_for_cb);
+                    }
+                });
+            }
+        });
 
-        // Block external (non-file://) navigation when local_only is enabled;
-        // always open clicked links in the system browser rather than the preview pane.
-        let local_only_init = config.appearance.local_only;
-        preview.connect_decide_policy(move |_, decision, decision_type| {
-            if decision_type == PolicyDecisionType::NavigationAction {
-                if let Ok(nav_decision) = decision.clone().downcast::<NavigationPolicyDecision>() {
-                    if let Some(action) = nav_decision.navigation_action() {
-                        if action.navigation_type() == NavigationType::LinkClicked {
-                            // Never navigate the preview pane — open all links externally.
-                            let uri = action.request()
-                                .and_then(|r| r.uri())
-                                .map(|s| s.to_string())
-                                .unwrap_or_default();
-                            decision.ignore();
-                            if !uri.is_empty() {
-                                let _ = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>);
+        // Welcome screen button clicks
+        let state_welcome_new = state.clone();
+        welcome_new_btn.connect_clicked(move |_| {
+            App::create_new_tab(&state_welcome_new, None);
+        });
+
+        let state_welcome_open = state.clone();
+        let window_welcome_open = window.clone();
+        welcome_open_btn.connect_clicked(move |_| {
+            App::trigger_open_dialog(&state_welcome_open, &window_welcome_open);
+        });
+
+        // Undo/Redo button clicks
+        let state_undo_btn_clone = state.clone();
+        undo_btn.connect_clicked(move |_| {
+            if let Some(tab) = state_undo_btn_clone.borrow().get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if tab_borrow.buffer.can_undo() {
+                    tab_borrow.buffer.undo();
+                }
+            }
+        });
+
+        let state_redo_btn_clone = state.clone();
+        redo_btn.connect_clicked(move |_| {
+            if let Some(tab) = state_redo_btn_clone.borrow().get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if tab_borrow.buffer.can_redo() {
+                    tab_borrow.buffer.redo();
+                }
+            }
+        });
+
+        // Toggle Visibility buttons
+        let state_editor_toggle = state.clone();
+        toggle_editor_btn.connect_toggled(move |btn| {
+            let visible = btn.is_active();
+            let s = state_editor_toggle.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if !visible && !tab_borrow.preview.is_visible() {
+                    btn.set_active(true);
+                } else {
+                    tab_borrow.editor_scroll.set_visible(visible);
+                }
+            }
+        });
+
+        let state_preview_toggle = state.clone();
+        toggle_preview_btn.connect_toggled(move |btn| {
+            let visible = btn.is_active();
+            let s = state_preview_toggle.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if !visible && !tab_borrow.editor_scroll.is_visible() {
+                    btn.set_active(true);
+                } else {
+                    tab_borrow.preview.set_visible(visible);
+                    if visible {
+                        let paned = &tab_borrow.paned;
+                        let pos = paned.position();
+                        let width = paned.width();
+                        if pos <= 0 || (width > 0 && pos >= width - 50) {
+                            paned.set_position(width / 2);
+                            if width == 0 {
+                                paned.set_position(500);
                             }
-                            return true;
-                        }
-                        // Block non-file:// navigation (e.g. form submits, redirects) when local_only
-                        let uri = action.request()
-                            .and_then(|r| r.uri())
-                            .map(|s| s.to_string())
-                            .unwrap_or_default();
-                        let is_external = !uri.starts_with("file://") && !uri.starts_with("about:");
-                        if local_only_init && is_external {
-                            decision.ignore();
-                            return true;
                         }
                     }
                 }
             }
-            false
         });
 
-        let buffer_scheme_clone = buffer.clone();
-        let update_scheme = {
-            let buffer = buffer.clone();
-            let scheme_manager = scheme_manager.clone();
-            let buffer_ref = buffer_scheme_clone.clone();
-            move |dark: bool| {
-                // Update Editor
-                let scheme_id = if dark { "adwaita-dark" } else { "adwaita" };
-                if let Some(scheme) = scheme_manager.scheme(scheme_id) {
-                    buffer.set_style_scheme(Some(&scheme));
-                } else {
-                    let fallback = if dark { "classic-dark" } else { "classic" };
-                    if let Some(scheme) = scheme_manager.scheme(fallback) {
-                        buffer.set_style_scheme(Some(&scheme));
-                    }
-                }
-
-                // Update Preview (WebView)
-                // We emit a changed signal to the buffer to trigger a re-render of the HTML with the new theme
-                use glib::prelude::*;
-                buffer_ref.emit_by_name::<()>("changed", &[]);
-            }
-        };
-
+        // Theme preview click
+        let style_manager = adw::StyleManager::default();
+        let style_manager_mode_clone = style_manager.clone();
         let preview_mode_btn_clone = preview_mode_btn.clone();
         let state_mode_clone = state.clone();
-        let style_manager_mode_clone = style_manager.clone();
+        
+        let update_scheme = {
+            let state_scheme = state.clone();
+            let scheme_manager = source::StyleSchemeManager::default();
+            move |dark: bool| {
+                let s = state_scheme.borrow();
+                let scheme_id = if dark { "adwaita-dark" } else { "adwaita" };
+                let fallback = if dark { "classic-dark" } else { "classic" };
+                
+                let scheme = scheme_manager.scheme(scheme_id)
+                    .or_else(|| scheme_manager.scheme(fallback));
+
+                for tab in &s.open_tabs {
+                    let tab_borrow = tab.borrow();
+                    if let Some(ref sc) = scheme {
+                        tab_borrow.buffer.set_style_scheme(Some(sc));
+                    }
+                    use glib::prelude::*;
+                    tab_borrow.buffer.emit_by_name::<()>("changed", &[]);
+                }
+            }
+        };
+
         let update_scheme_mode_clone = update_scheme.clone();
         preview_mode_btn.connect_clicked(move |_| {
             let (icon, tooltip) = {
@@ -431,107 +455,23 @@ impl App {
             preview_mode_btn_clone.set_icon_name(icon);
             preview_mode_btn_clone.set_tooltip_text(Some(tooltip));
 
-            // Trigger refresh
             update_scheme_mode_clone(style_manager_mode_clone.is_dark());
         });
 
-        let editor_scroll_clone = editor_scroll.clone();
-        let preview_clone_toggle = preview.clone();
-        let state_toggle_clone = state.clone();
-        
-        toggle_editor_btn.connect_toggled(move |btn| {
-            let visible = btn.is_active();
-            let should_revert = {
-                let mut s = state_toggle_clone.borrow_mut();
-                if !visible && !s.preview_visible {
-                    true
-                } else {
-                    s.editor_visible = visible;
-                    false
-                }
-            };
-
-            if should_revert {
-                btn.set_active(true);
-            } else {
-                editor_scroll_clone.set_visible(visible);
+        // Local-Only toggle
+        let state_lo_clone = state.clone();
+        local_only_btn.connect_toggled(move |btn| {
+            let active = btn.is_active();
+            let mut s = state_lo_clone.borrow_mut();
+            s.config.appearance.local_only = active;
+            let _ = crate::config::save_global_config(&s.config);
+            
+            // Re-render previews to include/remove CSP policy
+            for tab in &s.open_tabs {
+                use glib::prelude::*;
+                tab.borrow().buffer.emit_by_name::<()>("changed", &[]);
             }
         });
-
-        let state_toggle_p_clone = state.clone();
-        let preview_clone_toggle2 = preview_clone_toggle.clone();
-        let paned_clone_p = paned.clone();
-        toggle_preview_btn.connect_toggled(move |btn| {
-            let visible = btn.is_active();
-            let should_revert = {
-                let mut s = state_toggle_p_clone.borrow_mut();
-                if !visible && !s.editor_visible {
-                    true
-                } else {
-                    s.preview_visible = visible;
-                    false
-                }
-            };
-
-            if should_revert {
-                btn.set_active(true);
-            } else {
-                preview_clone_toggle2.set_visible(visible);
-                if visible {
-                    let pos = paned_clone_p.position();
-                    let width = paned_clone_p.width();
-                    if pos <= 0 || (width > 0 && pos >= width - 50) {
-                        paned_clone_p.set_position(width / 2);
-                        if width == 0 {
-                            paned_clone_p.set_position(500);
-                        }
-                    }
-                }
-            }
-        });
-
-        let preview_clone = preview.clone();
-        let state_clone = state.clone();
-        buffer.connect_changed(move |buf| {
-            let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
-
-            state_clone.borrow_mut().is_dirty = true;
-
-            let (is_smd, config, base_uri, preview_color_scheme, _) = {
-                let s = state_clone.borrow();
-                let is_smd = s.current_file.as_ref()
-                    .and_then(|p| p.extension())
-                    .and_then(|e| e.to_str())
-                    .map(|ext| ext == "smd")
-                    .unwrap_or(false);
-                let base_uri = s.current_file.as_ref()
-                    .and_then(|p| p.parent())
-                    .and_then(|d| d.to_str())
-                    .map(|d| format!("file://{}/", d));
-                (is_smd, s.config.clone(), base_uri, s.preview_color_scheme, s.config.appearance.local_only)
-            };
-
-            let highlight_color = config.appearance.highlight_color.clone();
-            let local_only = config.appearance.local_only;
-            let mut body = crate::parser::render_to_html(&text, &config);
-
-            if !is_smd {
-                body = format!(
-                    r#"<p class="warning">&#9888; Preview only available for .smd files</p>{}"#,
-                    body
-                );
-            }
-
-            let css = crate::config::get_style_css_path()
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .unwrap_or_default();
-
-            let html = crate::parser::build_html_document(&body, &css, preview_color_scheme, &highlight_color, local_only);
-            preview_clone.load_html(&html, base_uri.as_deref());
-        });
-
-        // Initial toolbar population
-        refresh_toolbar(state.clone(), None);
 
         // Status Bar
         let status_bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
@@ -546,278 +486,261 @@ impl App {
         status_bar.append(&cursor_label);
         state.borrow_mut().cursor_label = Some(cursor_label.clone());
 
-        let buffer_state_clone = state.clone();
-        let preview_cursor_clone = preview.clone();
-        buffer.connect_cursor_position_notify(move |buf| {
-            let offset = buf.cursor_position();
-            let iter = buf.iter_at_offset(offset);
-            let line = iter.line() + 1;
-            cursor_label.set_text(&format!("Line: {}, Col: {}", line, iter.line_offset() + 1));
-
-            // Update cursor indicator in preview
-            let js = format!("if(window._sfmde_setCursor)window._sfmde_setCursor({line});");
-            preview_cursor_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
-
-            // Record navigation history
-            let mut s = buffer_state_clone.borrow_mut();
-            if !s.is_navigating {
-                let nav_state = NavState {
-                    file: s.current_file.clone(),
-                    cursor_offset: offset,
-                };
-                
-                let should_push = s.nav_history.get(s.nav_index).map_or(true, |last| {
-                    last.file != nav_state.file || (last.cursor_offset - nav_state.cursor_offset).abs() > 100
-                });
-
-                if should_push {
-                    let new_len = s.nav_index + 1;
-                    s.nav_history.truncate(new_len);
-                    s.nav_history.push(nav_state);
-                    if s.nav_history.len() > s.config.history_length {
-                        s.nav_history.remove(0);
-                    }
-                    s.nav_index = s.nav_history.len().saturating_sub(1);
-                }
-            }
+        // Tab selection change notification
+        let state_notify_clone = state.clone();
+        tab_view.connect_notify_local(Some("selected-page"), move |_, _| {
+            App::sync_ui_to_active_tab(&state_notify_clone);
         });
 
-        // Editor scroll → preview scroll sync
-        let preview_scroll_clone = preview.clone();
-        editor_scroll.vadjustment().connect_value_changed(move |adj| {
-            let upper = adj.upper() - adj.page_size();
-            if upper <= 0.0 { return; }
-            let fraction = (adj.value() / upper).clamp(0.0, 1.0);
-            let js = format!("if(window._sfmde_syncScroll)window._sfmde_syncScroll({fraction:.4});");
-            preview_scroll_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
-        });
+        // Intercept close tab
+        let state_close_page_clone = state.clone();
+        tab_view.connect_close_page(move |view, page| {
+            let state_clone = state_close_page_clone.clone();
+            let view_clone = view.clone();
+            let page_clone = page.clone();
+            
+            let tab = {
+                let s = state_clone.borrow();
+                s.open_tabs.iter().find(|t| t.borrow().tab_page == page_clone).cloned()
+            };
 
-        // Setup File Callbacks
-        let buffer_n_clone = buffer.clone();
-        let state_n_clone = state.clone();
-        let window_n_clone = window.clone();
-        let toggle_p_n_clone = toggle_preview_btn.clone();
-        new_btn.connect_clicked(move |_| {
-            state_n_clone.borrow_mut().current_file = None;
-            buffer_n_clone.set_text("");
-            window_n_clone.set_title(Some("SFMDE - New File"));
-            toggle_p_n_clone.set_active(false);
-        });
+            if let Some(tab) = tab {
+                let is_dirty = tab.borrow().is_dirty;
+                if is_dirty {
+                    let parent_window = view_clone.root().and_then(|r| r.downcast::<gtk::Window>().ok());
+                    let dlg = adw::Window::builder()
+                        .modal(true)
+                        .transient_for(parent_window.as_ref().unwrap())
+                        .default_width(360)
+                        .resizable(false)
+                        .title("Unsaved Changes")
+                        .build();
+                    dlg.add_css_class("dialog-border");
 
-        let window_clone = window.clone();
-        let buffer_clone = buffer.clone();
-        let state_f_clone = state.clone();
-        let toggle_p_f_clone = toggle_preview_btn.clone();
-        open_btn.connect_clicked(move |_| {
-            let file_dialog = gtk::FileDialog::new();
-            // Restore last opened directory
-            let last_dir = state_f_clone.borrow().config.appearance.last_open_dir.clone();
-            if !last_dir.is_empty() {
-                let gfile = gio::File::for_path(&last_dir);
-                file_dialog.set_initial_folder(Some(&gfile));
-            }
-            let window_inner = window_clone.clone();
-            let buffer = buffer_clone.clone();
-            let state = state_f_clone.clone();
-            let toggle_p = toggle_p_f_clone.clone();
-            file_dialog.open(Some(&window_clone), gio::Cancellable::NONE, move |res| {
-                if let Ok(file) = res {
-                    if let Some(path) = file.path() {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            {
-                                let mut s = state.borrow_mut();
-                                if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
-                                    s.config.appearance.last_open_dir = dir.to_string();
-                                }
-                                s.current_file = Some(path.clone());
-                                s.is_dirty = false;
-                                if let Some(path_str) = path.to_str() {
-                                    crate::config::push_recent_file(&mut s.config, path_str);
-                                    let _ = crate::config::save_global_config(&s.config);
-                                }
+                    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                    let hbar = adw::HeaderBar::new();
+                    hbar.set_show_end_title_buttons(false);
+                    vbox.append(&hbar);
+
+                    let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
+                    body.set_margin_top(12);
+                    body.set_margin_bottom(24);
+                    body.set_margin_start(24);
+                    body.set_margin_end(24);
+
+                    let heading = gtk::Label::new(Some("Save changes before closing?"));
+                    heading.add_css_class("title-3");
+                    heading.set_halign(gtk::Align::Start);
+                    body.append(&heading);
+
+                    let filename = tab.borrow().file.as_ref()
+                        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string());
+                    let msg = gtk::Label::new(Some(&format!("The document \"{}\" has unsaved changes. If you close without saving, your changes will be discarded.", filename)));
+                    msg.set_wrap(true);
+                    msg.set_halign(gtk::Align::Start);
+                    msg.add_css_class("dim-label");
+                    body.append(&msg);
+
+                    let btn_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                    btn_row.set_halign(gtk::Align::End);
+                    btn_row.set_margin_top(8);
+                    let cancel_btn = gtk::Button::with_label("Cancel");
+                    let discard_btn = gtk::Button::with_label("Discard");
+                    discard_btn.add_css_class("destructive-action");
+                    let save_btn_inner = gtk::Button::with_label("Save");
+                    save_btn_inner.add_css_class("suggested-action");
+                    
+                    btn_row.append(&cancel_btn);
+                    btn_row.append(&discard_btn);
+                    btn_row.append(&save_btn_inner);
+                    body.append(&btn_row);
+
+                    vbox.append(&body);
+                    dlg.set_content(Some(&vbox));
+
+                    let dlg_cancel = dlg.clone();
+                    let view_cancel = view_clone.clone();
+                    let page_cancel = page_clone.clone();
+                    cancel_btn.connect_clicked(move |_| {
+                        view_cancel.close_page_finish(&page_cancel, false);
+                        dlg_cancel.close();
+                    });
+
+                    let dlg_discard = dlg.clone();
+                    let view_discard = view_clone.clone();
+                    let page_discard = page_clone.clone();
+                    let state_discard = state_clone.clone();
+                    discard_btn.connect_clicked(move |_| {
+                        state_discard.borrow_mut().open_tabs.retain(|t| t.borrow().tab_page != page_discard);
+                        view_discard.close_page_finish(&page_discard, true);
+                        App::sync_ui_to_active_tab(&state_discard);
+                        dlg_discard.close();
+                    });
+
+                    let dlg_save = dlg.clone();
+                    let view_save = view_clone.clone();
+                    let page_save = page_clone.clone();
+                    let state_save = state_clone.clone();
+                    let tab_save = tab.clone();
+                    save_btn_inner.connect_clicked(move |_| {
+                        let state_inner = state_save.clone();
+                        let state_inner_for_cb = state_inner.clone();
+                        let tab_inner = tab_save.clone();
+                        let view_inner = view_save.clone();
+                        let page_inner = page_save.clone();
+                        let dlg_inner = dlg_save.clone();
+                        let dlg_inner_for_cb = dlg_inner.clone();
+                        App::save_tab_with_callback(&state_inner, &tab_inner, &dlg_inner, move |success| {
+                            if success {
+                                state_inner_for_cb.borrow_mut().open_tabs.retain(|t| t.borrow().tab_page != page_inner);
+                                view_inner.close_page_finish(&page_inner, true);
+                                App::sync_ui_to_active_tab(&state_inner_for_cb);
+                                dlg_inner_for_cb.close();
                             }
-                            rebuild_recents_menu(&state);
-                            buffer.set_text(&content);
-                            window_inner.set_title(Some(&format!("SFMDE - {}", path.display())));
-                            let is_smd = path.extension()
-                                .and_then(|e| e.to_str())
-                                .map(|s| s == "smd")
-                                .unwrap_or(false);
-                            toggle_p.set_active(is_smd);
-                        }
-                    }
-                }
-            });
-        });
+                        });
+                    });
 
-        let save_as = {
-            let window = window.clone();
-            let buffer = buffer.clone();
-            let state = state.clone();
-            let toggle_p = toggle_preview_btn.clone();
-            move || {
-                let file_dialog = gtk::FileDialog::new();
-                let window_inner = window.clone();
-                let buffer = buffer.clone();
-                let state = state.clone();
-                let toggle_p = toggle_p.clone();
-                file_dialog.save(Some(&window), gio::Cancellable::NONE, move |res| {
-                    if let Ok(file) = res {
-                        if let Some(path) = file.path() {
-                            let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
-                            if std::fs::write(&path, text).is_ok() {
-                                let mut s = state.borrow_mut();
-                                s.current_file = Some(path.clone());
-                                s.is_dirty = false;
-                            }
-                            window_inner.set_title(Some(&format!("SFMDE - {}", path.display())));
-                            
-                            let is_smd = path.extension()
-                                .and_then(|e| e.to_str())
-                                .map(|s| s == "smd")
-                                .unwrap_or(false);
-                            toggle_p.set_active(is_smd);
-                            
-                            // Trigger a dummy edit to force preview refresh with new file state
-                            buffer.begin_user_action();
-                            let mut start = buffer.start_iter();
-                            buffer.insert(&mut start, "");
-                            buffer.end_user_action();
-                            // connect_changed fires synchronously above and marks dirty; undo that
-                            state.borrow_mut().is_dirty = false;
-                        }
-                    }
-                });
-            }
-        };
-
-        let save_as_clone = save_as.clone();
-        let state_s_clone = state.clone();
-        let buffer_s_clone = buffer.clone();
-        save_btn.connect_clicked(move |_| {
-            let path = state_s_clone.borrow().current_file.clone();
-            if let Some(path) = path {
-                let text = buffer_s_clone.text(&buffer_s_clone.start_iter(), &buffer_s_clone.end_iter(), false);
-                if std::fs::write(path, text).is_ok() {
-                    state_s_clone.borrow_mut().is_dirty = false;
+                    dlg.present();
+                } else {
+                    // Safe to close immediately
+                    state_clone.borrow_mut().open_tabs.retain(|t| t.borrow().tab_page != page_clone);
+                    view_clone.close_page_finish(&page_clone, true);
+                    App::sync_ui_to_active_tab(&state_clone);
                 }
             } else {
-                save_as_clone();
+                view_clone.close_page_finish(&page_clone, true);
             }
-        });
-
-        // Local-Only toggle action
-        let state_lo_clone = state.clone();
-        let buffer_lo_clone = buffer.clone();
-        local_only_btn.connect_toggled(move |btn| {
-            let active = btn.is_active();
-            {
-                let mut s = state_lo_clone.borrow_mut();
-                s.config.appearance.local_only = active;
-                let _ = crate::config::save_global_config(&s.config);
-            }
-            // Trigger preview re-render so CSP tag is added/removed
-            use glib::prelude::*;
-            buffer_lo_clone.emit_by_name::<()>("changed", &[]);
-        });
-
-        // Undo/Redo actions
-        let buffer_u_clone = buffer.clone();
-        undo_btn.connect_clicked(move |_| {
-            if buffer_u_clone.can_undo() {
-                buffer_u_clone.undo();
-            }
-        });
-
-        let buffer_r_clone = buffer.clone();
-        redo_btn.connect_clicked(move |_| {
-            if buffer_r_clone.can_redo() {
-                buffer_r_clone.redo();
-            }
+            
+            glib::Propagation::Stop
         });
 
         // Register Actions
         let action_new = gio::SimpleAction::new("new", None);
-        let buffer_an_clone = buffer.clone();
         let state_an_clone = state.clone();
-        let window_an_clone = window.clone();
-        let toggle_p_an_clone = toggle_preview_btn.clone();
         action_new.connect_activate(move |_, _| {
-            buffer_an_clone.set_text("");
-            state_an_clone.borrow_mut().current_file = None;
-            window_an_clone.set_title(Some("SFMDE - New File"));
-            toggle_p_an_clone.set_active(false);
+            App::create_new_tab(&state_an_clone, None);
         });
         app.add_action(&action_new);
 
         let action_open = gio::SimpleAction::new("open", None);
-        let open_btn_clone = open_btn.clone();
+        let state_ao_clone = state.clone();
+        let window_ao_clone = window.clone();
         action_open.connect_activate(move |_, _| {
-            open_btn_clone.emit_clicked();
+            App::trigger_open_dialog(&state_ao_clone, &window_ao_clone);
         });
         app.add_action(&action_open);
 
         let action_save = gio::SimpleAction::new("save", None);
-        let save_btn_clone = save_btn.clone();
+        let state_as_clone = state.clone();
+        let window_as_clone = window.clone();
         action_save.connect_activate(move |_, _| {
-            save_btn_clone.emit_clicked();
+            let active_tab = state_as_clone.borrow().get_active_tab();
+            if let Some(tab) = active_tab {
+                let state_inner = state_as_clone.clone();
+                let state_inner_for_cb = state_inner.clone();
+                App::save_tab_with_callback(&state_inner, &tab, &window_as_clone, move |success| {
+                    if success {
+                        App::sync_ui_to_active_tab(&state_inner_for_cb);
+                    }
+                });
+            }
         });
         app.add_action(&action_save);
 
         let action_save_as = gio::SimpleAction::new("save-as", None);
-        let save_as_action_clone = save_as.clone();
+        let state_asa_clone = state.clone();
+        let window_asa_clone = window.clone();
         action_save_as.connect_activate(move |_, _| {
-            save_as_action_clone();
+            let active_tab = state_asa_clone.borrow().get_active_tab();
+            if let Some(tab) = active_tab {
+                let original_file = tab.borrow().file.clone();
+                tab.borrow_mut().file = None;
+                
+                let state_inner = state_asa_clone.clone();
+                let state_inner_for_cb = state_inner.clone();
+                let tab_inner = tab.clone();
+                let tab_inner_for_cb = tab_inner.clone();
+                App::save_tab_with_callback(&state_inner, &tab_inner, &window_asa_clone, move |success| {
+                    if !success {
+                        tab_inner_for_cb.borrow_mut().file = original_file.clone();
+                    } else {
+                        App::sync_ui_to_active_tab(&state_inner_for_cb);
+                    }
+                });
+            }
         });
         app.add_action(&action_save_as);
 
         let action_undo = gio::SimpleAction::new("undo", None);
-        let undo_btn_clone = undo_btn.clone();
+        let state_au_clone = state.clone();
         action_undo.connect_activate(move |_, _| {
-            undo_btn_clone.emit_clicked();
+            if let Some(tab) = state_au_clone.borrow().get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if tab_borrow.buffer.can_undo() {
+                    tab_borrow.buffer.undo();
+                }
+            }
         });
         app.add_action(&action_undo);
 
         let action_redo = gio::SimpleAction::new("redo", None);
-        let redo_btn_clone = redo_btn.clone();
+        let state_ar_clone = state.clone();
         action_redo.connect_activate(move |_, _| {
-            redo_btn_clone.emit_clicked();
+            if let Some(tab) = state_ar_clone.borrow().get_active_tab() {
+                let tab_borrow = tab.borrow();
+                if tab_borrow.buffer.can_redo() {
+                    tab_borrow.buffer.redo();
+                }
+            }
         });
         app.add_action(&action_redo);
 
         let action_bold = gio::SimpleAction::new("bold", None);
-        let buffer_b_clone = buffer.clone();
         let state_b_clone = state.clone();
         action_bold.connect_activate(move |_, _| {
-            let symbol = state_b_clone.borrow().config.formatters.bold.symbol.clone();
-            apply_markup(&buffer_b_clone, &symbol);
+            let s = state_b_clone.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                let symbol = s.config.formatters.bold.symbol.clone();
+                apply_markup(&tab_borrow.buffer, &symbol);
+            }
         });
         app.add_action(&action_bold);
 
         let action_italics = gio::SimpleAction::new("italics", None);
-        let buffer_i_clone = buffer.clone();
         let state_i_clone = state.clone();
         action_italics.connect_activate(move |_, _| {
-            let symbol = state_i_clone.borrow().config.formatters.italics.symbol.clone();
-            apply_markup(&buffer_i_clone, &symbol);
+            let s = state_i_clone.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                let symbol = s.config.formatters.italics.symbol.clone();
+                apply_markup(&tab_borrow.buffer, &symbol);
+            }
         });
         app.add_action(&action_italics);
 
         let action_underscore = gio::SimpleAction::new("underscore", None);
-        let buffer_u_clone = buffer.clone();
         let state_u_clone = state.clone();
         action_underscore.connect_activate(move |_, _| {
-            let symbol = state_u_clone.borrow().config.formatters.underscore.symbol.clone();
-            apply_markup(&buffer_u_clone, &symbol);
+            let s = state_u_clone.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                let symbol = s.config.formatters.underscore.symbol.clone();
+                apply_markup(&tab_borrow.buffer, &symbol);
+            }
         });
         app.add_action(&action_underscore);
 
         let action_strikethrough = gio::SimpleAction::new("strikethrough", None);
-        let buffer_s_clone = buffer.clone();
         let state_s_clone = state.clone();
         action_strikethrough.connect_activate(move |_, _| {
-            let symbol = state_s_clone.borrow().config.formatters.strikethrough.symbol.clone();
-            apply_markup(&buffer_s_clone, &symbol);
+            let s = state_s_clone.borrow();
+            if let Some(tab) = s.get_active_tab() {
+                let tab_borrow = tab.borrow();
+                let symbol = s.config.formatters.strikethrough.symbol.clone();
+                apply_markup(&tab_borrow.buffer, &symbol);
+            }
         });
         app.add_action(&action_strikethrough);
 
@@ -834,8 +757,10 @@ impl App {
             let mut s = state_ww_clone.borrow_mut();
             s.config.appearance.word_wrap = new_val;
             let _ = crate::config::save_global_config(&s.config);
-            if let Some(view) = &s.editor_view {
-                view.set_wrap_mode(if new_val {
+            
+            for tab in &s.open_tabs {
+                let tab_borrow = tab.borrow();
+                tab_borrow.editor_view.set_wrap_mode(if new_val {
                     gtk4::WrapMode::WordChar
                 } else {
                     gtk4::WrapMode::None
@@ -844,32 +769,15 @@ impl App {
         });
         app.add_action(&action_word_wrap);
 
-        // Open Recent action — parameter is the file path string
         let action_open_recent = gio::SimpleAction::new(
             "open-recent",
             Some(&String::static_variant_type()),
         );
         let state_or_clone = state.clone();
-        let buffer_or_clone = buffer.clone();
-        let window_or_clone = window.clone();
-        let toggle_or_clone = toggle_preview_btn.clone();
         action_open_recent.connect_activate(move |_, param| {
             if let Some(path_str) = param.and_then(|v| v.get::<String>()) {
                 let path = std::path::PathBuf::from(&path_str);
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let is_smd = path.extension().and_then(|e| e.to_str()).map(|e| e == "smd").unwrap_or(false);
-                    {
-                        let mut s = state_or_clone.borrow_mut();
-                        s.current_file = Some(path.clone());
-                        s.is_dirty = false;
-                        if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
-                            s.config.appearance.last_open_dir = dir.to_string();
-                        }
-                    }
-                    buffer_or_clone.set_text(&content);
-                    window_or_clone.set_title(Some(&format!("SFMDE - {}", path.display())));
-                    toggle_or_clone.set_active(is_smd);
-                }
+                App::open_file_in_tab(&state_or_clone, &path);
             }
         });
         app.add_action(&action_open_recent);
@@ -899,7 +807,8 @@ impl App {
         let state_close_clone = state.clone();
         let window_close_clone = window.clone();
         window.connect_close_request(move |_| {
-            if !state_close_clone.borrow().is_dirty {
+            let any_dirty = state_close_clone.borrow().open_tabs.iter().any(|t| t.borrow().is_dirty);
+            if !any_dirty {
                 return glib::Propagation::Proceed;
             }
             let dlg = adw::Window::builder()
@@ -927,7 +836,7 @@ impl App {
             heading.set_halign(gtk::Align::Start);
             body.append(&heading);
 
-            let msg = gtk::Label::new(Some("Your changes will be lost if you close without saving."));
+            let msg = gtk::Label::new(Some("You have unsaved changes in one or more open tabs. If you close now, those changes will be lost."));
             msg.set_wrap(true);
             msg.set_halign(gtk::Align::Start);
             msg.add_css_class("dim-label");
@@ -937,7 +846,7 @@ impl App {
             btn_row.set_halign(gtk::Align::End);
             btn_row.set_margin_top(8);
             let cancel_btn = gtk::Button::with_label("Cancel");
-            let discard_btn = gtk::Button::with_label("Discard");
+            let discard_btn = gtk::Button::with_label("Discard All & Close");
             discard_btn.add_css_class("destructive-action");
             btn_row.append(&cancel_btn);
             btn_row.append(&discard_btn);
@@ -962,40 +871,496 @@ impl App {
 
         Self {
             window,
-            editor,
-            preview,
             state,
         }
     }
 
-    /// Open a file by path, replacing the current buffer contents.
-    pub fn open_file(&self, path: &std::path::Path) {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let is_smd = path.extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s == "smd")
-                .unwrap_or(false);
-            {
-                let mut s = self.state.borrow_mut();
-                s.current_file = Some(path.to_path_buf());
-                s.is_dirty = false;
-                if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
-                    s.config.appearance.last_open_dir = dir.to_string();
-                }
-                if let Some(path_str) = path.to_str() {
-                    crate::config::push_recent_file(&mut s.config, path_str);
-                    let _ = crate::config::save_global_config(&s.config);
-                }
-                if let Some(toggle) = &s.preview_toggle {
-                    toggle.set_active(is_smd);
+    pub fn create_new_tab(
+        state: &Rc<RefCell<AppState>>,
+        file: Option<PathBuf>,
+    ) -> Rc<RefCell<TabState>> {
+        let config = state.borrow().config.clone();
+        
+        let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
+        paned.set_vexpand(true);
+        
+        let editor_scroll = gtk::ScrolledWindow::new();
+        editor_scroll.set_overlay_scrolling(false);
+        
+        let editor = source::View::new();
+        editor.set_monospace(true);
+        editor.set_show_line_numbers(config.appearance.show_line_numbers);
+        editor.set_highlight_current_line(true);
+        editor.set_auto_indent(true);
+        editor.set_insert_spaces_instead_of_tabs(true);
+        editor.set_tab_width(4);
+        
+        if config.appearance.word_wrap {
+            editor.set_wrap_mode(gtk::WrapMode::WordChar);
+        } else {
+            editor.set_wrap_mode(gtk::WrapMode::None);
+        }
+        
+        let buffer = editor.buffer().downcast::<source::Buffer>().unwrap();
+        buffer.set_enable_undo(true);
+        buffer.set_max_undo_levels(config.history_length as u32);
+        
+        let scheme_manager = source::StyleSchemeManager::default();
+        let style_manager = adw::StyleManager::default();
+        
+        let update_scheme = {
+            let buffer = buffer.clone();
+            let scheme_manager = scheme_manager.clone();
+            move |dark: bool| {
+                let scheme_id = if dark { "adwaita-dark" } else { "adwaita" };
+                if let Some(scheme) = scheme_manager.scheme(scheme_id) {
+                    buffer.set_style_scheme(Some(&scheme));
+                } else {
+                    let fallback = if dark { "classic-dark" } else { "classic" };
+                    if let Some(scheme) = scheme_manager.scheme(fallback) {
+                        buffer.set_style_scheme(Some(&scheme));
+                    }
                 }
             }
-            rebuild_recents_menu(&self.state);
-            let buffer = self.editor.buffer()
-                .downcast::<source::Buffer>()
-                .unwrap();
-            buffer.set_text(&content);
-            self.window.set_title(Some(&format!("SFMDE - {}", path.display())));
+        };
+        
+        update_scheme(style_manager.is_dark());
+        
+        let buffer_scheme_clone = buffer.clone();
+        style_manager.connect_dark_notify(move |sm| {
+            let scheme_id = if sm.is_dark() { "adwaita-dark" } else { "adwaita" };
+            if let Some(scheme) = scheme_manager.scheme(scheme_id) {
+                buffer_scheme_clone.set_style_scheme(Some(&scheme));
+            }
+        });
+        
+        editor_scroll.set_child(Some(&editor));
+        paned.set_start_child(Some(&editor_scroll));
+        paned.set_resize_start_child(true);
+        
+        let settings = webkit6::Settings::builder()
+            .allow_file_access_from_file_urls(true)
+            .allow_universal_access_from_file_urls(true)
+            .build();
+        let preview = webkit6::WebView::builder()
+            .settings(&settings)
+            .build();
+        preview.set_vexpand(true);
+        preview.set_hexpand(true);
+        preview.set_visible(false); // Initially hide preview unless .smd is opened
+        paned.set_end_child(Some(&preview));
+        paned.set_resize_end_child(true);
+        
+        let local_only = config.appearance.local_only;
+        preview.connect_decide_policy(move |_, decision, decision_type| {
+            if decision_type == webkit6::PolicyDecisionType::NavigationAction {
+                if let Ok(nav_decision) = decision.clone().downcast::<webkit6::NavigationPolicyDecision>() {
+                    if let Some(action) = nav_decision.navigation_action() {
+                        if action.navigation_type() == webkit6::NavigationType::LinkClicked {
+                            let uri = action.request()
+                                .and_then(|r| r.uri())
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+                            decision.ignore();
+                            if !uri.is_empty() {
+                                let _ = gio::AppInfo::launch_default_for_uri(&uri, None::<&gio::AppLaunchContext>);
+                            }
+                            return true;
+                        }
+                        let uri = action.request()
+                            .and_then(|r| r.uri())
+                            .map(|s| s.to_string())
+                            .unwrap_or_default();
+                        let is_external = !uri.starts_with("file://") && !uri.starts_with("about:");
+                        if local_only && is_external {
+                            decision.ignore();
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        });
+        
+        let tab_page = state.borrow().tab_view.append(&paned);
+        
+        let (title, is_smd) = if let Some(p) = &file {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+            (name, ext == "smd")
+        } else {
+            ("Untitled".to_string(), false)
+        };
+        tab_page.set_title(&title);
+        if let Some(p) = &file {
+            tab_page.set_tooltip(&p.display().to_string());
         }
+        
+        let tab_state = Rc::new(RefCell::new(TabState {
+            file: file.clone(),
+            is_dirty: false,
+            buffer: buffer.clone(),
+            editor_view: editor.clone(),
+            editor_scroll: editor_scroll.clone(),
+            preview: preview.clone(),
+            paned: paned.clone(),
+            nav_history: Vec::new(),
+            nav_index: 0,
+            is_navigating: false,
+            tab_page: tab_page.clone(),
+        }));
+        
+        let state_changed_clone = state.clone();
+        let tab_changed_clone = tab_state.clone();
+        let preview_changed_clone = preview.clone();
+        buffer.connect_changed(move |buf| {
+            let text = buf.text(&buf.start_iter(), &buf.end_iter(), false);
+            
+            let mut tab = tab_changed_clone.borrow_mut();
+            tab.is_dirty = true;
+            tab.tab_page.set_needs_attention(true);
+            
+            let s = state_changed_clone.borrow();
+            
+            // Sync save button and title if this is the active tab
+            if let Some(selected_page) = s.tab_view.selected_page() {
+                if selected_page == tab.tab_page {
+                    if let Some(btn) = &s.save_btn {
+                        btn.set_sensitive(true);
+                    }
+                    if let Some(root) = s.tab_view.root() {
+                        if let Ok(w) = root.downcast::<gtk::Window>() {
+                            let title = tab.file.as_ref()
+                                .map(|p| format!("SFMDE - {}*", p.display()))
+                                .unwrap_or_else(|| "SFMDE - Untitled*".to_string());
+                            w.set_title(Some(&title));
+                        }
+                    }
+                }
+            }
+            
+            let is_smd = tab.file.as_ref()
+                .and_then(|p| p.extension())
+                .and_then(|e| e.to_str())
+                .map(|ext| ext == "smd")
+                .unwrap_or(false);
+            let base_uri = tab.file.as_ref()
+                .and_then(|p| p.parent())
+                .and_then(|d| d.to_str())
+                .map(|d| format!("file://{}/", d));
+                
+            let config = s.config.clone();
+            let highlight_color = config.appearance.highlight_color.clone();
+            let local_only = config.appearance.local_only;
+            let mut body = crate::parser::render_to_html(&text, &config);
+            
+            if !is_smd {
+                body = format!(
+                    r#"<p class="warning">&#9888; Preview only available for .smd files</p>{}"#,
+                    body
+                );
+            }
+            
+            let css = crate::config::get_style_css_path()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_default();
+                
+            let html = crate::parser::build_html_document(
+                &body,
+                &css,
+                s.preview_color_scheme,
+                &highlight_color,
+                local_only,
+            );
+            preview_changed_clone.load_html(&html, base_uri.as_deref());
+            
+            // Sync undo/redo buttons if active
+            if let Some(selected_page) = s.tab_view.selected_page() {
+                if selected_page == tab.tab_page {
+                    if let Some(undo_btn) = &s.undo_btn {
+                        undo_btn.set_sensitive(buf.can_undo());
+                    }
+                    if let Some(redo_btn) = &s.redo_btn {
+                        redo_btn.set_sensitive(buf.can_redo());
+                    }
+                }
+            }
+        });
+        
+        let state_cursor_clone = state.clone();
+        let tab_cursor_clone = tab_state.clone();
+        let preview_cursor_clone = preview.clone();
+        buffer.connect_cursor_position_notify(move |buf| {
+            let offset = buf.cursor_position();
+            let iter = buf.iter_at_offset(offset);
+            let line = iter.line() + 1;
+            
+            let s = state_cursor_clone.borrow();
+            let mut tab = tab_cursor_clone.borrow_mut();
+            
+            if let Some(selected_page) = s.tab_view.selected_page() {
+                if selected_page == tab.tab_page {
+                    if let Some(label) = &s.cursor_label {
+                        label.set_text(&format!("Line: {}, Col: {}", line, iter.line_offset() + 1));
+                    }
+                }
+            }
+            
+            let js = format!("if(window._sfmde_setCursor)window._sfmde_setCursor({line});");
+            preview_cursor_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
+            
+            if !tab.is_navigating {
+                let nav_state = NavState {
+                    file: tab.file.clone(),
+                    cursor_offset: offset,
+                };
+                
+                let should_push = tab.nav_history.get(tab.nav_index).map_or(true, |last| {
+                    last.file != nav_state.file || (last.cursor_offset - nav_state.cursor_offset).abs() > 100
+                });
+                
+                if should_push {
+                    let new_len = tab.nav_index + 1;
+                    tab.nav_history.truncate(new_len);
+                    tab.nav_history.push(nav_state);
+                    if tab.nav_history.len() > s.config.history_length {
+                        tab.nav_history.remove(0);
+                    }
+                    tab.nav_index = tab.nav_history.len().saturating_sub(1);
+                }
+            }
+        });
+        
+        let preview_scroll_clone = preview.clone();
+        editor_scroll.vadjustment().connect_value_changed(move |adj| {
+            let upper = adj.upper() - adj.page_size();
+            if upper <= 0.0 { return; }
+            let fraction = (adj.value() / upper).clamp(0.0, 1.0);
+            let js = format!("if(window._sfmde_syncScroll)window._sfmde_syncScroll({fraction:.4});");
+            preview_scroll_clone.evaluate_javascript(&js, None, None, None::<&gio::Cancellable>, |_| {});
+        });
+        
+        if let Some(p) = &file {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                buffer.set_text(&content);
+                tab_state.borrow_mut().is_dirty = false;
+                tab_page.set_needs_attention(false);
+            }
+        }
+        
+        // Show preview if .smd file
+        preview.set_visible(is_smd);
+        
+        state.borrow_mut().open_tabs.push(tab_state.clone());
+        state.borrow().tab_view.set_selected_page(&tab_page);
+        state.borrow().main_stack.set_visible_child_name("editor");
+        
+        App::sync_ui_to_active_tab(state);
+        
+        tab_state
+    }
+
+    pub fn save_tab_with_callback<F>(
+        state: &Rc<RefCell<AppState>>,
+        tab: &Rc<RefCell<TabState>>,
+        parent_window: &impl IsA<gtk::Window>,
+        callback: F,
+    ) where
+        F: Fn(bool) + 'static,
+    {
+        let tab_clone = tab.clone();
+        let path = tab.borrow().file.clone();
+        if let Some(path) = path {
+            let buffer = tab.borrow().buffer.clone();
+            let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+            if std::fs::write(&path, text).is_ok() {
+                tab_clone.borrow_mut().is_dirty = false;
+                tab_clone.borrow().tab_page.set_needs_attention(false);
+                callback(true);
+            } else {
+                callback(false);
+            }
+        } else {
+            let file_dialog = gtk::FileDialog::new();
+            let state_inner = state.clone();
+            let tab_inner = tab.clone();
+            let callback = Rc::new(callback);
+            let callback_clone = callback.clone();
+            file_dialog.save(Some(parent_window), gio::Cancellable::NONE, move |res| {
+                if let Ok(file) = res {
+                    if let Some(path) = file.path() {
+                        let buffer = tab_inner.borrow().buffer.clone();
+                        let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+                        if std::fs::write(&path, text).is_ok() {
+                            let mut t = tab_inner.borrow_mut();
+                            t.file = Some(path.clone());
+                            t.is_dirty = false;
+                            t.tab_page.set_needs_attention(false);
+                            
+                            let title = path.file_name().and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
+                            t.tab_page.set_title(&title);
+                            t.tab_page.set_tooltip(&path.display().to_string());
+                            
+                            // Trigger recent files addition
+                            let s = state_inner.borrow();
+                            if let Some(path_str) = path.to_str() {
+                                let mut s_config = s.config.clone();
+                                crate::config::push_recent_file(&mut s_config, path_str);
+                                let _ = crate::config::save_global_config(&s_config);
+                            }
+                            drop(s);
+                            rebuild_recents_menu(&state_inner);
+                            
+                            // Trigger a dummy edit to force preview refresh with new file state
+                            buffer.begin_user_action();
+                            let mut start = buffer.start_iter();
+                            buffer.insert(&mut start, "");
+                            buffer.end_user_action();
+                            t.is_dirty = false;
+                            
+                            callback_clone(true);
+                            return;
+                        }
+                    }
+                }
+                callback_clone(false);
+            });
+        }
+    }
+
+    pub fn trigger_open_dialog(
+        state: &Rc<RefCell<AppState>>,
+        parent_window: &adw::ApplicationWindow,
+    ) {
+        let file_dialog = gtk::FileDialog::new();
+        // Restore last opened directory
+        let last_dir = state.borrow().config.appearance.last_open_dir.clone();
+        if !last_dir.is_empty() {
+            let gfile = gio::File::for_path(&last_dir);
+            file_dialog.set_initial_folder(Some(&gfile));
+        }
+        
+        let state_inner = state.clone();
+        file_dialog.open(Some(parent_window), gio::Cancellable::NONE, move |res| {
+            if let Ok(file) = res {
+                if let Some(path) = file.path() {
+                    App::open_file_in_tab(&state_inner, &path);
+                }
+            }
+        });
+    }
+
+    pub fn open_file_in_tab(state: &Rc<RefCell<AppState>>, path: &std::path::Path) {
+        {
+            let s = state.borrow();
+            for tab in &s.open_tabs {
+                if tab.borrow().file.as_ref() == Some(&path.to_path_buf()) {
+                    s.tab_view.set_selected_page(&tab.borrow().tab_page);
+                    return;
+                }
+            }
+        }
+        
+        let _tab = App::create_new_tab(state, Some(path.to_path_buf()));
+        
+        let mut s = state.borrow_mut();
+        if let Some(dir) = path.parent().and_then(|d| d.to_str()) {
+            s.config.appearance.last_open_dir = dir.to_string();
+        }
+        if let Some(path_str) = path.to_str() {
+            crate::config::push_recent_file(&mut s.config, path_str);
+            let _ = crate::config::save_global_config(&s.config);
+        }
+        drop(s);
+        rebuild_recents_menu(state);
+        App::sync_ui_to_active_tab(state);
+    }
+
+    pub fn sync_ui_to_active_tab(state: &Rc<RefCell<AppState>>) {
+        let s = state.borrow();
+        if let Some(tab) = s.get_active_tab() {
+            let tab_borrow = tab.borrow();
+            
+            // 1. Title
+            if let Some(root) = s.tab_view.root() {
+                if let Ok(w) = root.downcast::<gtk::Window>() {
+                    let title = if tab_borrow.is_dirty {
+                        tab_borrow.file.as_ref()
+                            .map(|p| format!("SFMDE - {}*", p.display()))
+                            .unwrap_or_else(|| "SFMDE - Untitled*".to_string())
+                    } else {
+                        tab_borrow.file.as_ref()
+                            .map(|p| format!("SFMDE - {}", p.display()))
+                            .unwrap_or_else(|| "SFMDE - Untitled".to_string())
+                    };
+                    w.set_title(Some(&title));
+                }
+            }
+
+            // 2. Cursor label
+            if let Some(label) = &s.cursor_label {
+                let offset = tab_borrow.buffer.cursor_position();
+                let iter = tab_borrow.buffer.iter_at_offset(offset);
+                let line = iter.line() + 1;
+                label.set_text(&format!("Line: {}, Col: {}", line, iter.line_offset() + 1));
+                label.set_visible(s.config.appearance.show_line_col);
+            }
+
+            // 3. Save button sensitivity
+            if let Some(btn) = &s.save_btn {
+                btn.set_sensitive(true);
+            }
+
+            // 4. Undo/Redo sensitivities
+            if let Some(undo_btn) = &s.undo_btn {
+                undo_btn.set_sensitive(tab_borrow.buffer.can_undo());
+            }
+            if let Some(redo_btn) = &s.redo_btn {
+                redo_btn.set_sensitive(tab_borrow.buffer.can_redo());
+            }
+
+            // 5. Preview/Editor toggle states
+            if let Some(toggle) = &s.preview_toggle {
+                toggle.set_active(tab_borrow.preview.is_visible());
+            }
+            if let Some(toggle) = &s.editor_toggle {
+                toggle.set_active(tab_borrow.editor_scroll.is_visible());
+            }
+
+            // 6. Refresh formatting toolbar
+            drop(s);
+            refresh_toolbar(state.clone(), None);
+        } else {
+            // No active tabs: show empty screen and disable global buttons
+            if let Some(root) = s.tab_view.root() {
+                if let Ok(w) = root.downcast::<gtk::Window>() {
+                    w.set_title(Some("SFMDE"));
+                }
+            }
+
+            if let Some(label) = &s.cursor_label {
+                label.set_text("");
+                label.set_visible(false);
+            }
+
+            if let Some(btn) = &s.save_btn {
+                btn.set_sensitive(false);
+            }
+            if let Some(undo_btn) = &s.undo_btn {
+                undo_btn.set_sensitive(false);
+            }
+            if let Some(redo_btn) = &s.redo_btn {
+                redo_btn.set_sensitive(false);
+            }
+            
+            s.main_stack.set_visible_child_name("empty");
+            
+            drop(s);
+            refresh_toolbar(state.clone(), None);
+        }
+    }
+
+    pub fn open_file(&self, path: &std::path::Path) {
+        App::open_file_in_tab(&self.state, path);
     }
 }

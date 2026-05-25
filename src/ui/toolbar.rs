@@ -11,15 +11,18 @@ pub fn refresh_toolbar(state: Rc<RefCell<AppState>>, width: Option<i32>) {
         Some(t) => t,
         None => return,
     };
-    let buffer = match &s.buffer {
-        Some(b) => b,
-        None => return,
-    };
 
     // Clear existing children
     while let Some(child) = toolbar.first_child() {
         toolbar.remove(&child);
     }
+
+    let active_tab = match s.get_active_tab() {
+        Some(tab) => tab,
+        None => return, // No active tab, so toolbar remains empty
+    };
+
+    let buffer = active_tab.borrow().buffer.clone();
 
     let config = s.config.clone();
     let all = config.formatters.all_formatters();

@@ -42,7 +42,7 @@ fn test_xml_escape_no_special_chars() {
 
 #[test]
 fn test_build_html_document_structure() {
-    let doc = build_html_document("<p>hello</p>", "body { color: red; }", 0);
+    let doc = build_html_document("<p>hello</p>", "body { color: red; }", 0, "", true);
     assert!(doc.contains("<!DOCTYPE html>"), "got: {}", doc);
     assert!(doc.contains("<meta charset=\"utf-8\">"), "got: {}", doc);
     assert!(doc.contains("body { color: red; }"), "got: {}", doc);
@@ -51,7 +51,7 @@ fn test_build_html_document_structure() {
 
 #[test]
 fn test_build_html_document_error_class() {
-    let doc = build_html_document("", "", 0);
+    let doc = build_html_document("", "", 0, "", true);
     assert!(doc.contains(".error"), "got: {}", doc);
 }
 
@@ -59,32 +59,32 @@ fn test_build_html_document_error_class() {
 
 #[test]
 fn test_heading_h1() {
-    assert!(render("# Hello").contains("<h1>Hello</h1>"), "got: {}", render("# Hello"));
+    assert!(render("# Hello").contains("<h1 data-src-line=\"1\">Hello</h1>"), "got: {}", render("# Hello"));
 }
 
 #[test]
 fn test_heading_h2() {
-    assert!(render("## Hello").contains("<h2>Hello</h2>"));
+    assert!(render("## Hello").contains("<h2 data-src-line=\"1\">Hello</h2>"));
 }
 
 #[test]
 fn test_heading_h3() {
-    assert!(render("### Hello").contains("<h3>Hello</h3>"));
+    assert!(render("### Hello").contains("<h3 data-src-line=\"1\">Hello</h3>"));
 }
 
 #[test]
 fn test_heading_h4() {
-    assert!(render("#### Hello").contains("<h4>Hello</h4>"));
+    assert!(render("#### Hello").contains("<h4 data-src-line=\"1\">Hello</h4>"));
 }
 
 #[test]
 fn test_heading_h5() {
-    assert!(render("##### Hello").contains("<h5>Hello</h5>"));
+    assert!(render("##### Hello").contains("<h5 data-src-line=\"1\">Hello</h5>"));
 }
 
 #[test]
 fn test_heading_h6() {
-    assert!(render("###### Hello").contains("<h6>Hello</h6>"));
+    assert!(render("###### Hello").contains("<h6 data-src-line=\"1\">Hello</h6>"));
 }
 
 // ── Standard block elements ───────────────────────────────────────────────────
@@ -92,7 +92,7 @@ fn test_heading_h6() {
 #[test]
 fn test_paragraph_wrapping() {
     let out = render("Hello world");
-    assert!(out.contains("<p>"), "got: {}", out);
+    assert!(out.contains("<p data-src-line=\"1\">"), "got: {}", out);
     assert!(out.contains("Hello world"), "got: {}", out);
     assert!(out.contains("</p>"), "got: {}", out);
 }
@@ -118,7 +118,7 @@ fn test_horizontal_rule() {
 #[test]
 fn test_blockquote() {
     let out = render("> quoted");
-    assert!(out.contains("<blockquote>"), "got: {}", out);
+    assert!(out.contains("<blockquote data-src-line=\"1\">"), "got: {}", out);
     assert!(out.contains("quoted"), "got: {}", out);
     assert!(out.contains("</blockquote>"), "got: {}", out);
 }
@@ -159,7 +159,7 @@ fn test_link_standard() {
 #[test]
 fn test_code_block_output() {
     let out = render("```\nhello\n```");
-    assert!(out.contains("<pre>"), "got: {}", out);
+    assert!(out.contains("<pre data-src-line=\"1\">"), "got: {}", out);
     assert!(out.contains("<code>"), "got: {}", out);
     assert!(out.contains("hello"), "got: {}", out);
 }
@@ -189,16 +189,16 @@ fn test_code_block_suppresses_smd_formatting() {
 #[test]
 fn test_unordered_list() {
     let out = render("- item");
-    assert!(out.contains("<ul>"), "got: {}", out);
-    assert!(out.contains("<li>"), "got: {}", out);
+    assert!(out.contains("<ul data-src-line=\"1\">"), "got: {}", out);
+    assert!(out.contains("<li data-src-line=\"1\">"), "got: {}", out);
     assert!(out.contains("item"), "got: {}", out);
 }
 
 #[test]
 fn test_ordered_list() {
     let out = render("1. first\n2. second");
-    assert!(out.contains("<ol>"), "got: {}", out);
-    assert!(out.contains("<li>"), "got: {}", out);
+    assert!(out.contains("<ol start=\"1\" data-src-line=\"1\">"), "got: {}", out);
+    assert!(out.contains("<li data-src-line=\"1\">"), "got: {}", out);
 }
 
 #[test]

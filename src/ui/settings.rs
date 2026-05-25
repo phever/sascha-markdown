@@ -61,7 +61,8 @@ pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<A
         .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
         .unwrap_or_default();
 
-    let local_config = if let Some(path) = &state.borrow().current_file {
+    let current_file = state.borrow().get_active_tab().and_then(|t| t.borrow().file.clone());
+    let local_config = if let Some(path) = &current_file {
         crate::config::load_config(path.parent().unwrap()).unwrap_or_default()
     } else {
         crate::config::Config::default()
@@ -283,14 +284,16 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
         s.config.appearance = current_config.appearance.clone();
         apply_appearance(&s.css_provider, &s.config.appearance);
 
-        if let Some(view) = &s.editor_view {
-            view.set_wrap_mode(if s.config.appearance.word_wrap {
+        for tab in &s.open_tabs {
+            let tab_borrow = tab.borrow();
+            tab_borrow.editor_view.set_wrap_mode(if s.config.appearance.word_wrap {
                 gtk4::WrapMode::WordChar
             } else {
                 gtk4::WrapMode::None
             });
-            view.set_show_line_numbers(s.config.appearance.show_line_numbers);
+            tab_borrow.editor_view.set_show_line_numbers(s.config.appearance.show_line_numbers);
         }
+        
         if let Some(label) = &s.cursor_label {
             label.set_visible(s.config.appearance.show_line_col);
         }
@@ -353,13 +356,14 @@ pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::confi
             
             icon_img_clone.set_icon_name(Some(&ico));
 
+            let current_file = state_clone.borrow().get_active_tab().and_then(|t| t.borrow().file.clone());
             let mut current_config = if is_global_clone {
                  crate::config::get_global_config_path()
                     .and_then(|p| std::fs::read_to_string(p).ok())
                     .and_then(|c| toml::from_str::<crate::config::Config>(&c).ok())
                     .unwrap_or_default()
             } else {
-                if let Some(path) = &state_clone.borrow().current_file {
+                if let Some(path) = &current_file {
                     crate::config::load_config(path.parent().unwrap()).unwrap_or_default()
                 } else {
                     crate::config::Config::default()
@@ -379,14 +383,14 @@ pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::confi
             if is_global_clone {
                 let _ = crate::config::save_global_config(&current_config);
             } else {
-                if let Some(path) = &state_clone.borrow().current_file {
+                if let Some(path) = &current_file {
                     let _ = crate::config::save_local_config(&current_config, path.parent().unwrap());
                 }
             }
 
             // Refresh app state if it's the active config
             let mut s = state_clone.borrow_mut();
-            if let Some(path) = &s.current_file {
+            if let Some(path) = &current_file {
                 if let Ok(new_conf) = crate::config::load_config(path.parent().unwrap()) {
                     s.config = new_conf;
                 }

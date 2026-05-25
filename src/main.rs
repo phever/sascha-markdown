@@ -120,12 +120,12 @@ fn main() {
 
     app.connect_open(move |_app, files, _hint| {
         if let Some(ui) = shared_ui_open.borrow().as_ref() {
-            if let Some(file) = files.first() {
+            for file in files {
                 if let Some(path) = file.path() {
                     ui.open_file(&path);
-                    ui.window.present();
                 }
             }
+            ui.window.present();
         }
     });
 
