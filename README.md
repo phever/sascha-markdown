@@ -41,5 +41,3 @@ SFMDE is designed to be intuitive. If you get stuck, remember:
 -   **Menu**: Click the menu button (three lines) for "About" and "Save As" options.
 
 Happy Writing!
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q11YS6ML)
