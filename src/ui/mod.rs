@@ -1,4 +1,8 @@
 pub mod app;
+pub mod actions;
+pub mod file_ops;
+pub mod tab_manager;
+pub mod signals;
 pub mod markup;
 pub mod toolbar;
 pub mod settings;

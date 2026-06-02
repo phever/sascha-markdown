@@ -9,7 +9,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::ui::AppState;
 use crate::ui::toolbar::refresh_toolbar;
-use crate::ui::app::{apply_appearance, setup_accels};
+use crate::ui::app::apply_appearance;
+use crate::ui::actions::setup_accels;
 use gtk::pango;
 
 pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<AppState>>) {

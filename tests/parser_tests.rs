@@ -1,5 +1,5 @@
 use sfmde::config::Config;
-use sfmde::parser::{render_to_html, xml_escape, build_html_document};
+use sfmde::parser::{render_to_html, xml_escape, build_html_document, render_to_html_inline, build_html_document_inline_styles};
 
 fn render(text: &str) -> String {
     render_to_html(text, &Config::default())
@@ -392,4 +392,28 @@ fn test_smd_and_markdown_combined() {
     let out = render("**bold** and ||spoiler||");
     assert!(out.contains("<strong>bold</strong>"), "got: {}", out);
     assert!(out.contains(r#"class="spoiler""#), "got: {}", out);
+}
+
+#[test]
+fn test_render_to_html_inline() {
+    let config = Config::default();
+    let text = "# Hello\nThis is **bold** text and `code`.\n\n||spoiler|| and ==highlight==";
+    let out = render_to_html_inline(text, &config);
+    
+    assert!(out.contains("<h1 style=\"font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; margin-top: 24px; margin-bottom: 16px; font-weight: 600; color: #24292f;\">Hello</h1>"), "got: {}", out);
+    assert!(out.contains("<p style=\"margin-top: 0; margin-bottom: 16px; line-height: 1.6;\">This is <strong style=\"font-weight: bold;\">bold</strong> text and <code style=\"padding: 0.25em 0.4em; margin: 0; font-size: 85%; background-color: rgba(175,184,193,0.2); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;\">code</code>.</p>"), "got: {}", out);
+    assert!(out.contains("class=\"spoiler\" style=\"background-color: #b5bac1; color: #b5bac1; border-radius: 3px; padding: 0 3px; cursor: pointer;\""), "got: {}", out);
+    assert!(out.contains("<mark style=\"background-color: #fff2a8;\">"), "got: {}", out);
+    // Ensure no data-src-line attribute is present
+    assert!(!out.contains("data-src-line"), "got: {}", out);
+}
+
+#[test]
+fn test_build_html_document_inline_styles() {
+    let body = "<p>body content</p>";
+    let doc = build_html_document_inline_styles(body, "My Title");
+    assert!(doc.contains("<!DOCTYPE html>"), "got: {}", doc);
+    assert!(doc.contains("<title>My Title</title>"), "got: {}", doc);
+    assert!(doc.contains("<body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #24292f; background-color: #ffffff; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 30px;\">"), "got: {}", doc);
+    assert!(doc.contains("<p>body content</p>"), "got: {}", doc);
 }
