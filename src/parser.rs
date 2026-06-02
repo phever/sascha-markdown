@@ -140,7 +140,59 @@ fn lookup_emoji(name: &str) -> Option<&'static str> {
 
 /// Pre-processes the text to replace SMD tags with HTML equivalents,
 /// while respecting GFM code blocks and inline code.
-fn preprocess_smd(text: &str, config: &Config) -> String {
+struct StackEntry {
+    tag_name: String,
+    html_open: String,
+    html_close: String,
+    output_start: usize,
+    raw_symbol: String,
+    original_byte: usize,
+}
+
+struct PreprocessorOutput {
+    output: String,
+    map: Vec<usize>,
+}
+
+impl PreprocessorOutput {
+    fn new() -> Self {
+        Self {
+            output: String::new(),
+            map: Vec::new(),
+        }
+    }
+
+    fn push_char(&mut self, c: char, original_byte: usize) {
+        let len = c.len_utf8();
+        for _ in 0..len {
+            self.map.push(original_byte);
+        }
+        self.output.push(c);
+    }
+
+    fn push_str(&mut self, s: &str, original_byte: usize) {
+        for c in s.chars() {
+            self.push_char(c, original_byte);
+        }
+    }
+
+    fn push_segment(&mut self, s: &str, start_char_idx: usize, char_to_byte: &[usize]) {
+        for (idx, c) in s.chars().enumerate() {
+            let orig_byte = char_to_byte[start_char_idx + idx];
+            self.push_char(c, orig_byte);
+        }
+    }
+
+    fn replace_range_with_mapped(&mut self, range: std::ops::Range<usize>, new_str: &str, original_byte: usize) {
+        let new_len = new_str.len();
+        self.output.replace_range(range.clone(), new_str);
+        self.map.splice(range, std::iter::repeat(original_byte).take(new_len));
+    }
+}
+
+/// Pre-processes the text to replace SMD tags with HTML equivalents,
+/// while respecting GFM code blocks and inline code.
+fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
     let mut excluded_ranges = Vec::new();
     let parser = Parser::new_ext(text, Options::all());
     for (event, range) in parser.into_offset_iter() {
@@ -162,9 +214,9 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
     char_to_byte.push(byte_offset);
 
     let mut i = 0;
-    let mut output = String::new();
-    // Stack: (tag_name, html_open, html_close, output_start_index, char_start)
-    let mut stack: Vec<(String, String, String, usize, usize)> = Vec::new();
+    let mut out_writer = PreprocessorOutput::new();
+    // Stack: entries tracking open formatting tags
+    let mut stack: Vec<StackEntry> = Vec::new();
 
     while i < chars.len() {
         let current_byte = char_to_byte[i];
@@ -177,7 +229,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
                 end_char += 1;
             }
             let segment: String = chars[i..end_char].iter().collect();
-            output.push_str(&segment);
+            out_writer.push_segment(&segment, i, &char_to_byte);
             i = end_char;
             continue;
         }
@@ -199,7 +251,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
             if end < chars.len() && match_at(&chars, end, &config.formatters.emoji_prefix.symbol) {
                 let name: String = chars[start..end].iter().collect();
                 if let Some(emoji_char) = lookup_emoji(&name) {
-                    output.push_str(emoji_char);
+                    out_writer.push_str(emoji_char, current_byte);
                     i = end + sym_len;
                     continue;
                 }
@@ -289,7 +341,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
             && match_at(&chars, i, &config.formatters.named_quote.symbol)
         {
             let sym_len = config.formatters.named_quote.symbol.chars().count();
-            let already_open = stack.iter().any(|(t, _, _, _, _)| t == "NamedQuote");
+            let already_open = stack.iter().any(|entry| entry.tag_name == "NamedQuote");
             if already_open {
                 matched_tag = Some("NamedQuote".to_string());
                 skip = sym_len;
@@ -312,7 +364,7 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
             && match_at(&chars, i, &config.formatters.collapse.symbol)
         {
             let sym_len = config.formatters.collapse.symbol.chars().count();
-            let already_open = stack.iter().any(|(t, _, _, _, _)| t == "Collapse");
+            let already_open = stack.iter().any(|entry| entry.tag_name == "Collapse");
             if already_open {
                 matched_tag = Some("Collapse".to_string());
                 skip = sym_len;
@@ -362,36 +414,63 @@ fn preprocess_smd(text: &str, config: &Config) -> String {
         }
 
         if let Some(tag) = matched_tag {
-            let found_index = stack.iter().rposition(|(t, _, _, _, _)| t == &tag);
+            let raw_symbol: String = chars[i..i + skip].iter().collect();
+            let found_index = stack.iter().rposition(|entry| entry.tag_name == tag);
 
             if let Some(idx) = found_index {
                 if idx == stack.len() - 1 {
-                    let (_, _, html_c, _, _) = stack.pop().unwrap();
-                    output.push_str(&html_c);
+                    let entry = stack.pop().unwrap();
+                    out_writer.push_str(&entry.html_close, current_byte);
                 } else {
-                    while stack.len() > idx {
-                        let (_, _, html_c, _, _) = stack.pop().unwrap();
-                        output.push_str(&html_c);
+                    while stack.len() > idx + 1 {
+                        let entry = stack.pop().unwrap();
+                        let open_len = entry.html_open.len();
+                        let error_open = format!(r#"<span class="error">{}"#, entry.raw_symbol);
+                        out_writer.replace_range_with_mapped(
+                            entry.output_start..entry.output_start + open_len,
+                            &error_open,
+                            entry.original_byte,
+                        );
+                        out_writer.push_str("</span>", current_byte);
                     }
+                    let entry = stack.pop().unwrap();
+                    out_writer.push_str(&entry.html_close, current_byte);
                 }
             } else {
-                let output_start = output.len();
-                output.push_str(&html_open);
-                stack.push((tag, html_open, html_close, output_start, i));
+                let output_start = out_writer.output.len();
+                out_writer.push_str(&html_open, current_byte);
+                stack.push(StackEntry {
+                    tag_name: tag,
+                    html_open,
+                    html_close,
+                    output_start,
+                    raw_symbol,
+                    original_byte: current_byte,
+                });
             }
             i += skip;
         } else {
-            output.push(chars[i]);
+            out_writer.push_char(chars[i], current_byte);
             i += 1;
         }
     }
 
-    // Unclosed tags: just close them so prior correctly-rendered content is preserved.
-    while let Some((_, _, html_close, _, _)) = stack.pop() {
-        output.push_str(&html_close);
+    // Unclosed tags: convert them to error spans
+    while let Some(entry) = stack.pop() {
+        let open_len = entry.html_open.len();
+        let error_open = format!(r#"<span class="error">{}"#, entry.raw_symbol);
+        out_writer.replace_range_with_mapped(
+            entry.output_start..entry.output_start + open_len,
+            &error_open,
+            entry.original_byte,
+        );
+        let end_byte = text.len();
+        out_writer.push_str("</span>", end_byte);
     }
 
-    output
+    out_writer.map.push(text.len());
+
+    (out_writer.output, out_writer.map)
 }
 
 /// Renders SFM-flavoured markdown to an HTML body fragment.
@@ -440,14 +519,15 @@ fn tag_html_close(end: &TagEnd) -> &'static str {
 
 pub fn render_to_html(text: &str, config: &Config) -> String {
     let options = Options::all();
-    let preprocessed = preprocess_smd(text, config);
+    let (preprocessed, map) = preprocess_smd(text, config);
 
-    // Map byte offsets in the preprocessed text to 1-based line numbers.
-    let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(preprocessed.match_indices('\n').map(|(i, _)| i + 1))
+    // Map byte offsets in the original text to 1-based line numbers.
+    let original_line_starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
         .collect();
     let byte_to_line = |byte: usize| -> u32 {
-        line_starts.partition_point(|&s| s <= byte).saturating_sub(1) as u32 + 1
+        let orig_byte = if byte < map.len() { map[byte] } else { text.len() };
+        original_line_starts.partition_point(|&s| s <= orig_byte).saturating_sub(1) as u32 + 1
     };
 
     let parser = Parser::new_ext(&preprocessed, options).into_offset_iter();
@@ -478,6 +558,10 @@ pub fn render_to_html(text: &str, config: &Config) -> String {
                     html::push_html(&mut tmp, std::iter::once(Event::End(end.clone())));
                     body.push_str(&tmp);
                 }
+            }
+            Event::Rule => {
+                let line = byte_to_line(range.start);
+                body.push_str(&format!(r#"<hr data-src-line="{line}" />"#));
             }
             other => {
                 let mut tmp = String::new();
