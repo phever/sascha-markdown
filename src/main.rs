@@ -118,7 +118,18 @@ fn main() {
         *shared_ui.borrow_mut() = Some(ui);
     });
 
-    app.connect_open(move |_app, files, _hint| {
+    app.connect_open(move |app, files, _hint| {
+        // When launched by double-clicking a file, only `open` fires (no `activate`),
+        // so the window may not exist yet.
+        if shared_ui_open.borrow().is_none() {
+            let ui = App::new(app);
+            ui.window.set_icon_name(Some("logo"));
+            ui.window.present();
+            if first_run {
+                show_welcome_dialog(&ui.window);
+            }
+            *shared_ui_open.borrow_mut() = Some(ui);
+        }
         if let Some(ui) = shared_ui_open.borrow().as_ref() {
             for file in files {
                 if let Some(path) = file.path() {

@@ -417,3 +417,139 @@ fn test_build_html_document_inline_styles() {
     assert!(doc.contains("<body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #24292f; background-color: #ffffff; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 30px;\">"), "got: {}", doc);
     assert!(doc.contains("<p>body content</p>"), "got: {}", doc);
 }
+
+// ── Strict symbol handling (only configured symbols format) ──────────────────
+
+#[test]
+fn test_default_markdown_disabled_when_symbols_customized() {
+    // Sascha's case: custom double-symbols configured, stray standard markdown
+    // must render literally instead of falling back to default semantics.
+    let out = render_with("*single* and **double**", |c| {
+        c.formatters.italics.symbol = "//".to_string();
+        c.formatters.bold.symbol = "||*".to_string();
+        c.formatters.spoiler.symbol = "%%".to_string();
+    });
+    assert!(!out.contains("<em>"), "got: {}", out);
+    assert!(!out.contains("<strong>"), "got: {}", out);
+    assert!(out.contains("*single*"), "got: {}", out);
+}
+
+#[test]
+fn test_custom_symbols_work_while_defaults_are_literal() {
+    let out = render_with("//italic// and *plain*", |c| {
+        c.formatters.italics.symbol = "//".to_string();
+    });
+    assert!(out.contains("<em>italic</em>"), "got: {}", out);
+    assert!(out.contains("*plain*"), "got: {}", out);
+}
+
+#[test]
+fn test_disabled_formatter_is_plain_text() {
+    let out = render_with("==not highlighted==", |c| {
+        c.formatters.highlight.enabled = false;
+    });
+    assert!(!out.contains("<mark>"), "got: {}", out);
+    assert!(out.contains("==not highlighted=="), "got: {}", out);
+}
+
+#[test]
+fn test_disabled_italics_renders_literal_asterisks() {
+    let out = render_with("*text*", |c| {
+        c.formatters.italics.enabled = false;
+    });
+    assert!(!out.contains("<em>"), "got: {}", out);
+    assert!(out.contains("*text*"), "got: {}", out);
+}
+
+#[test]
+fn test_disabled_spoiler_is_plain_text() {
+    let out = render_with("||not hidden||", |c| {
+        c.formatters.spoiler.enabled = false;
+    });
+    assert!(!out.contains(r#"class="spoiler""#), "got: {}", out);
+    assert!(out.contains("||not hidden||"), "got: {}", out);
+}
+
+// ── Quotes ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_inline_quote_default_symbol() {
+    let out = render("she said \"hello\" today");
+    assert!(out.contains("<q>hello</q>"), "got: {}", out);
+}
+
+#[test]
+fn test_custom_blockquote_symbol() {
+    let out = render_with(":: quoted text", |c| {
+        c.formatters.blockquote.symbol = ":: ".to_string();
+    });
+    assert!(out.contains("<blockquote"), "got: {}", out);
+    assert!(out.contains("quoted text"), "got: {}", out);
+}
+
+#[test]
+fn test_custom_nested_blockquote_symbol() {
+    let out = render_with("::: deep", |c| {
+        c.formatters.blockquote.symbol = ":: ".to_string();
+        c.formatters.nested_blockquote.symbol = "::: ".to_string();
+    });
+    assert_eq!(out.matches("<blockquote").count(), 2, "got: {}", out);
+}
+
+#[test]
+fn test_default_gt_not_blockquote_when_symbol_changed() {
+    let out = render_with("> not a quote", |c| {
+        c.formatters.blockquote.symbol = ":: ".to_string();
+        c.formatters.nested_blockquote.symbol = "::: ".to_string();
+    });
+    assert!(!out.contains("<blockquote"), "got: {}", out);
+    assert!(out.contains("&gt; not a quote"), "got: {}", out);
+}
+
+#[test]
+fn test_default_blockquote_still_works() {
+    let out = render("> quoted");
+    assert!(out.contains("<blockquote"), "got: {}", out);
+}
+
+// ── Whitespace preservation ───────────────────────────────────────────────────
+
+#[test]
+fn test_multiple_interior_spaces_preserved() {
+    let out = render("a    b");
+    // first space stays breakable, the rest become NBSP
+    assert!(out.contains("a \u{a0}\u{a0}\u{a0}b"), "got: {}", out);
+}
+
+#[test]
+fn test_leading_indent_preserved_as_text() {
+    let out = render("    indented line");
+    assert!(!out.contains("<pre"), "got: {}", out);
+    assert!(out.contains("\u{a0}\u{a0}\u{a0}\u{a0}indented line"), "got: {}", out);
+}
+
+#[test]
+fn test_nested_list_indentation_still_works() {
+    let out = render("- outer\n  - inner");
+    assert_eq!(out.matches("<ul").count(), 2, "got: {}", out);
+    assert!(out.contains("inner"), "got: {}", out);
+}
+
+#[test]
+fn test_nested_ordered_list_still_works() {
+    let out = render("1. outer\n   1. inner");
+    assert_eq!(out.matches("<ol").count(), 2, "got: {}", out);
+}
+
+#[test]
+fn test_trailing_double_space_hard_break_preserved() {
+    let out = render("line one  \nline two");
+    assert!(out.contains("<br"), "got: {}", out);
+}
+
+#[test]
+fn test_fenced_code_block_keeps_spaces_verbatim() {
+    let out = render("```\n    let x = 1;\n```");
+    assert!(out.contains("    let x = 1;"), "got: {}", out);
+    assert!(!out.contains("\u{a0}"), "got: {}", out);
+}

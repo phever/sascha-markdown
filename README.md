@@ -14,8 +14,9 @@ You might be familiar with standard "Markdown"—a way to write text that automa
 *   **Highly Customizable**: Redefine almost every formatting symbol to match your personal writing style.
 *   **Modern Design**: Built with a sleek, "Adwaita" look that feels right at home on modern desktops.
 *   **Dark Mode Support**: Automatically switches between light and dark themes to match your computer's settings—no more eye strain!
-*   **Navigation History**: Just like a web browser, use the **Back** and **Forward** buttons to jump between your previous edits or different files.
-*   **Simple File Management**: Easily create, open, and save your `.smd` (Sascha Markdown) files.
+*   **Tabs**: Open several files at once, and the app stays open even with no file loaded. You'll be warned before closing anything with unsaved changes.
+*   **Local-Only Mode**: By default the preview only loads images and links from your own computer—nothing is fetched from the internet unless you turn that on.
+*   **Simple File Management**: Easily create, open, and save your `.smd` (Sascha Markdown) files. Use "Install Locally" from the welcome screen to make `.smd` files open with a double-click.
 
 ## How to Get Started
 
@@ -34,10 +35,19 @@ If you want to change how the editor works (like changing your "Bold" symbol or 
 2.  Open `sfmde.config` with any text editor.
 3.  Change the symbols to your heart's content!
 
+### 4. Writing Tips
+-   **Only your symbols count**: formatting is driven entirely by the symbols in your settings. If you change Bold to something custom, a stray `**` from regular Markdown is shown as plain text instead of surprising you with bold.
+-   **Lists inside lists**: indent the inner item by two spaces:
+    ```
+    - outer item
+      - inner item
+    ```
+-   **Indentation and spacing are yours**: leading spaces and runs of multiple spaces are preserved in the preview instead of being collapsed (list indentation still nests as above).
+
 ## Need Help?
 SFMDE is designed to be intuitive. If you get stuck, remember:
--   **Undo/Redo**: Use the arrows in the top right if you make a mistake.
--   **Back/Forward**: Use the arrows in the top left to move through your history.
+-   **Undo/Redo**: Use the arrows in the top left if you make a mistake.
+-   **Settings**: The gear button opens Settings. "User" holds your personal defaults; "Local" saves overrides next to the current file (a `.smdconfig` file) that win over your defaults. Each formatter has a symbol, an *Enabled* switch (off = the symbol is treated as plain text), and a toolbar switch.
 -   **Menu**: Click the menu button (three lines) for "About" and "Save As" options.
 
 Happy Writing!

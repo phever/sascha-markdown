@@ -4,10 +4,17 @@ use std::fs;
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FormatterEntry {
     pub symbol: String,
     pub visible: bool,
+    /// Whether the formatter is parsed at all. `visible` only controls the toolbar.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub icon_name: String,
 }
 
@@ -16,6 +23,7 @@ impl FormatterEntry {
         Self {
             symbol: symbol.to_string(),
             visible,
+            enabled: true,
             icon_name: icon_name.to_string(),
         }
     }
@@ -62,91 +70,62 @@ pub struct FormatterConfig {
     pub collapse: FormatterEntry,
 }
 
-impl FormatterConfig {
-    pub fn all_formatters(&self) -> Vec<(String, String, bool, String)> {
-        vec![
-            ("Italics".to_string(), self.italics.symbol.clone(), self.italics.visible, self.italics.icon_name.clone()),
-            ("Bold".to_string(), self.bold.symbol.clone(), self.bold.visible, self.bold.icon_name.clone()),
-            ("Underscore".to_string(), self.underscore.symbol.clone(), self.underscore.visible, self.underscore.icon_name.clone()),
-            ("Strikethrough".to_string(), self.strikethrough.symbol.clone(), self.strikethrough.visible, self.strikethrough.icon_name.clone()),
-            ("Paragraph".to_string(), self.paragraph.symbol.clone(), self.paragraph.visible, self.paragraph.icon_name.clone()),
-            ("Preformatted".to_string(), self.preformatted.symbol.clone(), self.preformatted.visible, self.preformatted.icon_name.clone()),
-            ("Font Size Change".to_string(), self.font_size_change.symbol.clone(), self.font_size_change.visible, self.font_size_change.icon_name.clone()),
-            ("Align Left".to_string(), self.align_left.symbol.clone(), self.align_left.visible, self.align_left.icon_name.clone()),
-            ("Align Right".to_string(), self.align_right.symbol.clone(), self.align_right.visible, self.align_right.icon_name.clone()),
-            ("Align Center".to_string(), self.align_center.symbol.clone(), self.align_center.visible, self.align_center.icon_name.clone()),
-            ("Align Justify".to_string(), self.align_justify.symbol.clone(), self.align_justify.visible, self.align_justify.icon_name.clone()),
-            ("Superscript".to_string(), self.superscript.symbol.clone(), self.superscript.visible, self.superscript.icon_name.clone()),
-            ("Subscript".to_string(), self.subscript.symbol.clone(), self.subscript.visible, self.subscript.icon_name.clone()),
-            ("Code Block".to_string(), self.code_block.symbol.clone(), self.code_block.visible, self.code_block.icon_name.clone()),
-            ("Blockquote".to_string(), self.blockquote.symbol.clone(), self.blockquote.visible, self.blockquote.icon_name.clone()),
-            ("Nested Blockquote".to_string(), self.nested_blockquote.symbol.clone(), self.nested_blockquote.visible, self.nested_blockquote.icon_name.clone()),
-            ("Escape Char".to_string(), self.escape_char.symbol.clone(), self.escape_char.visible, self.escape_char.icon_name.clone()),
-            ("Font Color".to_string(), self.font_color.symbol.clone(), self.font_color.visible, self.font_color.icon_name.clone()),
-            ("Highlight".to_string(), self.highlight.symbol.clone(), self.highlight.visible, self.highlight.icon_name.clone()),
-            ("Table Start".to_string(), self.table_start.symbol.clone(), self.table_start.visible, self.table_start.icon_name.clone()),
-            ("Table Row".to_string(), self.table_row.symbol.clone(), self.table_row.visible, self.table_row.icon_name.clone()),
-            ("Table Cell".to_string(), self.table_cell.symbol.clone(), self.table_cell.visible, self.table_cell.icon_name.clone()),
-            ("URL Link".to_string(), self.url_link.symbol.clone(), self.url_link.visible, self.url_link.icon_name.clone()),
-            ("Image Insert".to_string(), self.image_insert.symbol.clone(), self.image_insert.visible, self.image_insert.icon_name.clone()),
-            ("Unordered List".to_string(), self.unordered_list.symbol.clone(), self.unordered_list.visible, self.unordered_list.icon_name.clone()),
-            ("Ordered List".to_string(), self.ordered_list.symbol.clone(), self.ordered_list.visible, self.ordered_list.icon_name.clone()),
-            ("Task List".to_string(), self.task_list.symbol.clone(), self.task_list.visible, self.task_list.icon_name.clone()),
-            ("Quote".to_string(), self.quote.symbol.clone(), self.quote.visible, self.quote.icon_name.clone()),
-            ("Named Quote".to_string(), self.named_quote.symbol.clone(), self.named_quote.visible, self.named_quote.icon_name.clone()),
-            ("Spoiler".to_string(), self.spoiler.symbol.clone(), self.spoiler.visible, self.spoiler.icon_name.clone()),
-            ("Horizontal Rule".to_string(), self.horizontal_rule.symbol.clone(), self.horizontal_rule.visible, self.horizontal_rule.icon_name.clone()),
-            ("Heading Prefix".to_string(), self.heading_prefix.symbol.clone(), self.heading_prefix.visible, self.heading_prefix.icon_name.clone()),
-            ("Heading ID".to_string(), self.heading_id.symbol.clone(), self.heading_id.visible, self.heading_id.icon_name.clone()),
-            ("Footnote".to_string(), self.footnote.symbol.clone(), self.footnote.visible, self.footnote.icon_name.clone()),
-            ("Emoji Prefix".to_string(), self.emoji_prefix.symbol.clone(), self.emoji_prefix.visible, self.emoji_prefix.icon_name.clone()),
-            ("Collapse".to_string(), self.collapse.symbol.clone(), self.collapse.visible, self.collapse.icon_name.clone()),
-        ]
-    }
+macro_rules! formatter_fields {
+    ($($name:literal => $field:ident),* $(,)?) => {
+        impl FormatterConfig {
+            pub fn all_formatters(&self) -> Vec<(String, FormatterEntry)> {
+                vec![ $( ($name.to_string(), self.$field.clone()), )* ]
+            }
 
-    pub fn update_from_vec(&mut self, formatters: Vec<(String, String, bool, String)>) {
-        for (name, symbol, visible, icon_name) in formatters {
-            match name.as_str() {
-                "Italics" => self.italics = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Bold" => self.bold = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Underscore" => self.underscore = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Strikethrough" => self.strikethrough = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Paragraph" => self.paragraph = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Preformatted" => self.preformatted = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Font Size Change" => self.font_size_change = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Align Left" => self.align_left = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Align Right" => self.align_right = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Align Center" => self.align_center = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Align Justify" => self.align_justify = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Superscript" => self.superscript = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Subscript" => self.subscript = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Code Block" => self.code_block = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Blockquote" => self.blockquote = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Nested Blockquote" => self.nested_blockquote = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Escape Char" => self.escape_char = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Font Color" => self.font_color = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Highlight" => self.highlight = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Table Start" => self.table_start = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Table Row" => self.table_row = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Table Cell" => self.table_cell = FormatterEntry::new(&symbol, visible, &icon_name),
-                "URL Link" => self.url_link = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Image Insert" => self.image_insert = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Unordered List" => self.unordered_list = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Ordered List" => self.ordered_list = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Task List" => self.task_list = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Quote" => self.quote = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Named Quote" => self.named_quote = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Spoiler" => self.spoiler = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Horizontal Rule" => self.horizontal_rule = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Heading Prefix" => self.heading_prefix = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Heading ID" => self.heading_id = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Footnote" => self.footnote = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Emoji Prefix" => self.emoji_prefix = FormatterEntry::new(&symbol, visible, &icon_name),
-                "Collapse" => self.collapse = FormatterEntry::new(&symbol, visible, &icon_name),
-                _ => {}
+            pub fn update_from_vec(&mut self, formatters: Vec<(String, FormatterEntry)>) {
+                for (name, entry) in formatters {
+                    match name.as_str() {
+                        $( $name => self.$field = entry, )*
+                        _ => {}
+                    }
+                }
             }
         }
-    }
+    };
+}
+
+formatter_fields! {
+    "Italics" => italics,
+    "Bold" => bold,
+    "Underscore" => underscore,
+    "Strikethrough" => strikethrough,
+    "Paragraph" => paragraph,
+    "Preformatted" => preformatted,
+    "Font Size Change" => font_size_change,
+    "Align Left" => align_left,
+    "Align Right" => align_right,
+    "Align Center" => align_center,
+    "Align Justify" => align_justify,
+    "Superscript" => superscript,
+    "Subscript" => subscript,
+    "Code Block" => code_block,
+    "Blockquote" => blockquote,
+    "Nested Blockquote" => nested_blockquote,
+    "Escape Char" => escape_char,
+    "Font Color" => font_color,
+    "Highlight" => highlight,
+    "Table Start" => table_start,
+    "Table Row" => table_row,
+    "Table Cell" => table_cell,
+    "URL Link" => url_link,
+    "Image Insert" => image_insert,
+    "Unordered List" => unordered_list,
+    "Ordered List" => ordered_list,
+    "Task List" => task_list,
+    "Quote" => quote,
+    "Named Quote" => named_quote,
+    "Spoiler" => spoiler,
+    "Horizontal Rule" => horizontal_rule,
+    "Heading Prefix" => heading_prefix,
+    "Heading ID" => heading_id,
+    "Footnote" => footnote,
+    "Emoji Prefix" => emoji_prefix,
+    "Collapse" => collapse,
 }
 
 impl Default for FormatterConfig {

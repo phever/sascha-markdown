@@ -26,7 +26,7 @@ pub fn refresh_toolbar(state: Rc<RefCell<AppState>>, width: Option<i32>) {
 
     let config = s.config.clone();
     let all = config.formatters.all_formatters();
-    let visible_items: Vec<_> = all.into_iter().filter(|(_, _, v, _)| *v).collect();
+    let visible_items: Vec<_> = all.into_iter().filter(|(_, e)| e.visible && e.enabled).collect();
     
     // Calculate how many buttons fit
     // Average button width is ~38px, plus spacing. 
@@ -44,11 +44,11 @@ pub fn refresh_toolbar(state: Rc<RefCell<AppState>>, width: Option<i32>) {
     let main_box = gtk::Box::new(gtk::Orientation::Horizontal, 5);
     toolbar.append(&main_box);
 
-    for (name, symbol, _, icon_name) in primary {
-        let btn = gtk::Button::from_icon_name(icon_name);
+    for (name, entry) in primary {
+        let btn = gtk::Button::from_icon_name(&entry.icon_name);
         btn.set_tooltip_text(Some(name));
         let buffer_clone = buffer.clone();
-        let symbol_clone = symbol.clone();
+        let symbol_clone = entry.symbol.clone();
         btn.connect_clicked(move |_| {
             apply_markup(&buffer_clone, &symbol_clone);
         });
@@ -71,11 +71,11 @@ pub fn refresh_toolbar(state: Rc<RefCell<AppState>>, width: Option<i32>) {
         overflow_box.set_column_spacing(5);
         overflow_box.set_row_spacing(5);
 
-        for (name, symbol, _, icon_name) in overflow {
-            let btn = gtk::Button::from_icon_name(icon_name);
+        for (name, entry) in overflow {
+            let btn = gtk::Button::from_icon_name(&entry.icon_name);
             btn.set_tooltip_text(Some(name));
             let buffer_clone = buffer.clone();
-            let symbol_clone = symbol.clone();
+            let symbol_clone = entry.symbol.clone();
             let pop_clone = popover.clone();
             btn.connect_clicked(move |_| {
                 apply_markup(&buffer_clone, &symbol_clone);

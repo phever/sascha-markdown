@@ -1,6 +1,33 @@
-use crate::config::Config;
+use crate::config::{Config, FormatterEntry};
 use crate::parser::emoji::lookup_emoji;
-use pulldown_cmark::{Options, Parser, Event, Tag};
+use pulldown_cmark::{CodeBlockKind, Options, Parser, Event, Tag};
+
+/// A formatter takes part in parsing only when enabled and given a symbol.
+fn on(entry: &FormatterEntry) -> bool {
+    entry.enabled && !entry.symbol.is_empty()
+}
+
+/// True if a configured list marker (or `1.`-style ordered marker) starts at `idx`.
+/// Leading spaces before these must stay real spaces so pulldown-cmark can nest lists.
+fn is_list_marker_at(chars: &[char], idx: usize, config: &Config) -> bool {
+    let f = &config.formatters;
+    if on(&f.task_list) && match_at(chars, idx, &f.task_list.symbol) {
+        return true;
+    }
+    if on(&f.unordered_list) && match_at(chars, idx, &f.unordered_list.symbol) {
+        return true;
+    }
+    if on(&f.ordered_list) {
+        let mut j = idx;
+        while j < chars.len() && chars[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j > idx && j + 1 < chars.len() && chars[j] == '.' && chars[j + 1] == ' ' {
+            return true;
+        }
+    }
+    false
+}
 
 pub fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
@@ -74,7 +101,12 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
     let parser = Parser::new_ext(text, Options::all());
     for (event, range) in parser.into_offset_iter() {
         match event {
-            Event::Start(Tag::CodeBlock(_)) | Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => {
+            // Only fenced code blocks are excluded: indented lines are treated as
+            // regular text (with indentation preserved), not accidental code blocks.
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
+            | Event::Code(_)
+            | Event::Html(_)
+            | Event::InlineHtml(_) => {
                 excluded_ranges.push(range);
             }
             _ => {}
@@ -97,6 +129,7 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
 
     while i < chars.len() {
         let current_byte = char_to_byte[i];
+        let at_line_start = i == 0 || chars[i - 1] == '\n';
 
         // Check if we are in an excluded range (code block, inline code, etc.)
         if let Some(range) = excluded_ranges.iter().find(|r| r.start <= current_byte && r.end > current_byte) {
@@ -111,8 +144,48 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
             continue;
         }
 
+        if at_line_start {
+            let mut n = 0;
+            while i + n < chars.len() && chars[i + n] == ' ' {
+                n += 1;
+            }
+            let rest = i + n;
+
+            // Configured blockquote symbols are translated to canonical markdown
+            // so pulldown-cmark builds the blockquote structure.
+            let nested_bq = &config.formatters.nested_blockquote;
+            let bq = &config.formatters.blockquote;
+            if on(nested_bq) && match_at(&chars, rest, &nested_bq.symbol) {
+                for k in 0..n {
+                    out_writer.push_char(' ', char_to_byte[i + k]);
+                }
+                out_writer.push_str("> > ", char_to_byte[rest]);
+                i = rest + nested_bq.symbol.chars().count();
+                continue;
+            }
+            if on(bq) && match_at(&chars, rest, &bq.symbol) {
+                for k in 0..n {
+                    out_writer.push_char(' ', char_to_byte[i + k]);
+                }
+                out_writer.push_str("> ", char_to_byte[rest]);
+                i = rest + bq.symbol.chars().count();
+                continue;
+            }
+
+            if n > 0 {
+                // Leading indentation: keep real spaces in front of list markers so
+                // lists can nest; otherwise preserve the indent visibly as NBSPs.
+                let keep = is_list_marker_at(&chars, rest, config);
+                for k in 0..n {
+                    out_writer.push_char(if keep { ' ' } else { '\u{00A0}' }, char_to_byte[i + k]);
+                }
+                i = rest;
+                continue;
+            }
+        }
+
         // Emoji shortcode: :name: — handled before the stack-based system
-        if !config.formatters.emoji_prefix.symbol.is_empty()
+        if on(&config.formatters.emoji_prefix)
             && match_at(&chars, i, &config.formatters.emoji_prefix.symbol)
         {
             let sym_len = config.formatters.emoji_prefix.symbol.chars().count();
@@ -141,52 +214,57 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
         let mut html_open = String::new();
         let mut html_close = String::new();
 
-        if match_at(&chars, i, &config.formatters.bold.symbol) {
+        if on(&config.formatters.bold) && match_at(&chars, i, &config.formatters.bold.symbol) {
             matched_tag = Some("Bold".to_string());
             html_open = "<strong>".to_string();
             html_close = "</strong>".to_string();
             skip = config.formatters.bold.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.italics.symbol) {
+        } else if on(&config.formatters.italics) && match_at(&chars, i, &config.formatters.italics.symbol) {
             matched_tag = Some("Italics".to_string());
             html_open = "<em>".to_string();
             html_close = "</em>".to_string();
             skip = config.formatters.italics.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.underscore.symbol) {
+        } else if on(&config.formatters.underscore) && match_at(&chars, i, &config.formatters.underscore.symbol) {
             matched_tag = Some("Underscore".to_string());
             html_open = "<u>".to_string();
             html_close = "</u>".to_string();
             skip = config.formatters.underscore.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.strikethrough.symbol) {
+        } else if on(&config.formatters.strikethrough) && match_at(&chars, i, &config.formatters.strikethrough.symbol) {
             matched_tag = Some("Strikethrough".to_string());
             html_open = "<s>".to_string();
             html_close = "</s>".to_string();
             skip = config.formatters.strikethrough.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.spoiler.symbol) {
+        } else if on(&config.formatters.spoiler) && match_at(&chars, i, &config.formatters.spoiler.symbol) {
             matched_tag = Some("Spoiler".to_string());
             html_open = r#"<span class="spoiler">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.spoiler.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.highlight.symbol) {
+        } else if on(&config.formatters.highlight) && match_at(&chars, i, &config.formatters.highlight.symbol) {
             matched_tag = Some("Highlight".to_string());
             html_open = "<mark>".to_string();
             html_close = "</mark>".to_string();
             skip = config.formatters.highlight.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.superscript.symbol) {
+        } else if on(&config.formatters.superscript) && match_at(&chars, i, &config.formatters.superscript.symbol) {
             matched_tag = Some("Superscript".to_string());
             html_open = "<sup>".to_string();
             html_close = "</sup>".to_string();
             skip = config.formatters.superscript.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.subscript.symbol) {
+        } else if on(&config.formatters.subscript) && match_at(&chars, i, &config.formatters.subscript.symbol) {
             matched_tag = Some("Subscript".to_string());
             html_open = "<sub>".to_string();
             html_close = "</sub>".to_string();
             skip = config.formatters.subscript.symbol.chars().count();
-        } else if match_at(&chars, i, &config.formatters.footnote.symbol) {
+        } else if on(&config.formatters.footnote) && match_at(&chars, i, &config.formatters.footnote.symbol) {
             matched_tag = Some("Footnote".to_string());
             html_open = r#"<sup class="footnote">"#.to_string();
             html_close = "</sup>".to_string();
             skip = config.formatters.footnote.symbol.chars().count();
-        } else if !config.formatters.font_color.symbol.is_empty()
+        } else if on(&config.formatters.quote) && match_at(&chars, i, &config.formatters.quote.symbol) {
+            matched_tag = Some("Quote".to_string());
+            html_open = "<q>".to_string();
+            html_close = "</q>".to_string();
+            skip = config.formatters.quote.symbol.chars().count();
+        } else if on(&config.formatters.font_color)
             && match_at(&chars, i, &config.formatters.font_color.symbol)
         {
             let sym_len = config.formatters.font_color.symbol.chars().count();
@@ -200,7 +278,7 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
             html_open = format!("<span style=\"color: {}\">", xml_escape(&color));
             html_close = "</span>".to_string();
             skip = end - i;
-        } else if !config.formatters.font_size_change.symbol.is_empty()
+        } else if on(&config.formatters.font_size_change)
             && match_at(&chars, i, &config.formatters.font_size_change.symbol)
         {
             let sym_len = config.formatters.font_size_change.symbol.chars().count();
@@ -214,7 +292,7 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
             html_open = format!("<span style=\"font-size: {}pt\">", xml_escape(&size));
             html_close = "</span>".to_string();
             skip = end - i;
-        } else if !config.formatters.named_quote.symbol.is_empty()
+        } else if on(&config.formatters.named_quote)
             && match_at(&chars, i, &config.formatters.named_quote.symbol)
         {
             let sym_len = config.formatters.named_quote.symbol.chars().count();
@@ -237,7 +315,7 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
                 html_close = "</blockquote>".to_string();
                 skip = if end < chars.len() { end - i + 1 } else { end - i };
             }
-        } else if !config.formatters.collapse.symbol.is_empty()
+        } else if on(&config.formatters.collapse)
             && match_at(&chars, i, &config.formatters.collapse.symbol)
         {
             let sym_len = config.formatters.collapse.symbol.chars().count();
@@ -260,28 +338,28 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
                 html_close = "</details>".to_string();
                 skip = if end < chars.len() { end - i + 1 } else { end - i };
             }
-        } else if !config.formatters.align_left.symbol.is_empty()
+        } else if on(&config.formatters.align_left)
             && match_at(&chars, i, &config.formatters.align_left.symbol)
         {
             matched_tag = Some("AlignLeft".to_string());
             html_open = r#"<span style="display:block;text-align:left">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.align_left.symbol.chars().count();
-        } else if !config.formatters.align_right.symbol.is_empty()
+        } else if on(&config.formatters.align_right)
             && match_at(&chars, i, &config.formatters.align_right.symbol)
         {
             matched_tag = Some("AlignRight".to_string());
             html_open = r#"<span style="display:block;text-align:right">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.align_right.symbol.chars().count();
-        } else if !config.formatters.align_center.symbol.is_empty()
+        } else if on(&config.formatters.align_center)
             && match_at(&chars, i, &config.formatters.align_center.symbol)
         {
             matched_tag = Some("AlignCenter".to_string());
             html_open = r#"<span style="display:block;text-align:center">"#.to_string();
             html_close = "</span>".to_string();
             skip = config.formatters.align_center.symbol.chars().count();
-        } else if !config.formatters.align_justify.symbol.is_empty()
+        } else if on(&config.formatters.align_justify)
             && match_at(&chars, i, &config.formatters.align_justify.symbol)
         {
             matched_tag = Some("AlignJustify".to_string());
@@ -327,8 +405,37 @@ pub fn preprocess_smd(text: &str, config: &Config) -> (String, Vec<usize>) {
             }
             i += skip;
         } else {
-            out_writer.push_char(chars[i], current_byte);
-            i += 1;
+            let c = chars[i];
+            if c == '*' || c == '_' || c == '~' {
+                // Default markdown delimiter that no configured formatter claimed:
+                // escape it so pulldown-cmark renders it literally instead of
+                // falling back to standard markdown semantics.
+                out_writer.push_char('\\', current_byte);
+                out_writer.push_char(c, current_byte);
+                i += 1;
+            } else if c == '>' && at_line_start {
+                // Same strictness for blockquotes: only the configured symbol quotes.
+                out_writer.push_char('\\', current_byte);
+                out_writer.push_char(c, current_byte);
+                i += 1;
+            } else if c == ' ' && i + 1 < chars.len() && chars[i + 1] == ' ' {
+                // Run of 2+ interior spaces: keep the first breakable, preserve the
+                // rest as NBSPs so they survive HTML rendering. Runs at end of line
+                // are left untouched (trailing double-space is a markdown hard break).
+                let mut n = 0;
+                while i + n < chars.len() && chars[i + n] == ' ' {
+                    n += 1;
+                }
+                let ends_line = i + n >= chars.len() || chars[i + n] == '\n' || chars[i + n] == '\r';
+                for k in 0..n {
+                    let keep_real = ends_line || k == 0;
+                    out_writer.push_char(if keep_real { ' ' } else { '\u{00A0}' }, char_to_byte[i + k]);
+                }
+                i += n;
+            } else {
+                out_writer.push_char(c, current_byte);
+                i += 1;
+            }
         }
     }
 

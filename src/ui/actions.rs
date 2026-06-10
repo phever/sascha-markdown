@@ -19,7 +19,7 @@ pub fn setup_accels(app: &adw::Application, config: &Config) {
     app.set_accels_for_action("app.redo", &[&config.hotkeys.get("Redo")]);
 
     // Formatter actions (dynamic)
-    for (name, _, _, _) in config.formatters.all_formatters() {
+    for (name, _) in config.formatters.all_formatters() {
         let action_name = name.to_lowercase().replace(' ', "-");
         app.set_accels_for_action(&format!("app.{}", action_name), &[&config.hotkeys.get(&name)]);
     }

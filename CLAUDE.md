@@ -10,9 +10,10 @@ cargo build --release      # release build (binary: target/release/sfmde)
 cargo run                  # run the app
 cargo check                # type-check without building
 cargo clippy               # lint
+cargo test                 # run tests (parser/config tests run headless)
 ```
 
-There are no automated tests. The app requires a display to run (GTK4).
+The app requires a display to run (GTK4).
 
 ## Architecture
 
@@ -22,7 +23,7 @@ SFMDE is a GTK4/libadwaita desktop Markdown editor written in Rust. It edits `.s
 
 - **`src/main.rs`** — entry point; calls `config::ensure_config_exists()` on first run, constructs the `adw::Application`, shows a welcome dialog if config was just created.
 - **`src/config.rs`** — all config structs (`FormatterConfig`, `HotkeysConfig`, `AppearanceConfig`, `Config`) serialized as TOML. Two config tiers: global at `~/.config/sascha-flavored-markdown/sfmde.config` and per-directory `.smdconfig`. Local takes precedence over global. Also manages `style.css` (preview CSS).
-- **`src/parser.rs`** — custom line-oriented `BetterParser` that produces `Event` items and `render_to_html`. Uses config symbols at parse time so all formatting delimiters are user-configurable. Note: `pulldown-cmark` is listed as a dependency but is not used; the parser is fully custom.
+- **`src/parser/`** — `preprocessor.rs` translates the user-configured symbols (read from `Config`, gated on each formatter's `enabled` flag) into HTML/canonical markdown, escaping unconfigured default delimiters (`*`, `_`, `~`, line-start `>`) so only configured symbols format text, and preserving leading/multiple spaces as NBSPs (list-marker indents stay real so lists nest). `renderer.rs` then runs the result through `pulldown-cmark`, injecting `data-src-line` attributes for editor/preview cursor sync.
 - **`src/ui/mod.rs`** — shared state types: `AppState` (current file, config, nav history, toolbar/buffer refs) and `App` (window, editor, preview). `AppState` is always accessed via `Rc<RefCell<AppState>>`.
 - **`src/ui/app.rs`** — entire window construction and all GTK signal wiring. Also `apply_appearance` (dynamic CSS injection for font/color) and `setup_accels` (keyboard shortcut registration).
 - **`src/ui/markup.rs`** — `apply_markup`: wraps/unwraps a selection with a symbol, or toggles list prefixes line-by-line.

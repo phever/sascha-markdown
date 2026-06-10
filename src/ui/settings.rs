@@ -43,10 +43,18 @@ pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<A
 
     let user_group = adw::PreferencesGroup::new();
     user_group.set_title("Formatters (Global)");
+    user_group.set_description(Some(
+        "Your personal defaults, stored in ~/.config/sascha-flavored-markdown/sfmde.config. \
+         They apply to every file unless the file's folder has Local overrides.",
+    ));
     user_page.add(&user_group);
 
     let local_group = adw::PreferencesGroup::new();
     local_group.set_title("Formatters (Local)");
+    local_group.set_description(Some(
+        "Overrides for the current file's folder, stored in a .smdconfig file next to it. \
+         When present, Local settings take precedence over User settings.",
+    ));
     local_page.add(&local_group);
 
     let hotkeys_group = adw::PreferencesGroup::new();
@@ -79,7 +87,7 @@ pub fn show_settings_dialog(parent: &adw::ApplicationWindow, state: Rc<RefCell<A
 
 pub fn populate_hotkeys_group(group: &adw::PreferencesGroup, config: crate::config::Config, state: Rc<RefCell<AppState>>) {
     let mut formatter_names = Vec::new();
-    for (name, _, _, _) in config.formatters.all_formatters() {
+    for (name, _) in config.formatters.all_formatters() {
         formatter_names.push(name);
     }
     
@@ -315,28 +323,35 @@ pub fn populate_appearance_group(group: &adw::PreferencesGroup, config: crate::c
 
 pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::config::Config, is_global: bool, state: Rc<RefCell<AppState>>) {
     let formatters = config.formatters.all_formatters();
-    for (name, symbol, visible, icon_name) in formatters {
+    for (name, formatter) in formatters {
         let row = adw::ActionRow::new();
         row.set_title(&name);
 
-        let icon_img = gtk::Image::from_icon_name(&icon_name);
+        let icon_img = gtk::Image::from_icon_name(&formatter.icon_name);
         row.add_prefix(&icon_img);
 
         let entry = gtk::Entry::new();
-        entry.set_text(&symbol);
+        entry.set_text(&formatter.symbol);
         entry.set_valign(gtk::Align::Center);
         entry.set_placeholder_text(Some("Symbol"));
         row.add_suffix(&entry);
 
         let icon_entry = gtk::Entry::new();
-        icon_entry.set_text(&icon_name);
+        icon_entry.set_text(&formatter.icon_name);
         icon_entry.set_valign(gtk::Align::Center);
         icon_entry.set_placeholder_text(Some("Icon Name"));
         row.add_suffix(&icon_entry);
 
+        let enabled_toggle = gtk::Switch::new();
+        enabled_toggle.set_active(formatter.enabled);
+        enabled_toggle.set_valign(gtk::Align::Center);
+        enabled_toggle.set_tooltip_text(Some("Enabled: parse this symbol at all. Off means the symbol is treated as plain text."));
+        row.add_suffix(&enabled_toggle);
+
         let toggle = gtk::Switch::new();
-        toggle.set_active(visible);
+        toggle.set_active(formatter.visible);
         toggle.set_valign(gtk::Align::Center);
+        toggle.set_tooltip_text(Some("Show this formatter's button on the toolbar."));
         row.add_suffix(&toggle);
 
         group.add(&row);
@@ -344,17 +359,19 @@ pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::confi
         let state_clone = state.clone();
         let name_clone = name.clone();
         let is_global_clone = is_global;
-        
+
         let entry_clone = entry.clone();
         let icon_entry_clone = icon_entry.clone();
         let toggle_clone = toggle.clone();
+        let enabled_clone = enabled_toggle.clone();
         let icon_img_clone = icon_img.clone();
-        
+
         let save_func = move || {
             let sym = entry_clone.text().to_string();
             let ico = icon_entry_clone.text().to_string();
             let vis = toggle_clone.is_active();
-            
+            let ena = enabled_clone.is_active();
+
             icon_img_clone.set_icon_name(Some(&ico));
 
             let current_file = state_clone.borrow().get_active_tab().and_then(|t| t.borrow().file.clone());
@@ -372,11 +389,12 @@ pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::confi
             };
 
             let mut f_vec = current_config.formatters.all_formatters();
-            for (n, s, v, i) in f_vec.iter_mut() {
+            for (n, f) in f_vec.iter_mut() {
                 if n == &name_clone {
-                    *s = sym.clone();
-                    *v = vis;
-                    *i = ico.clone();
+                    f.symbol = sym.clone();
+                    f.visible = vis;
+                    f.enabled = ena;
+                    f.icon_name = ico.clone();
                 }
             }
             current_config.formatters.update_from_vec(f_vec);
@@ -399,6 +417,11 @@ pub fn populate_config_group(group: &adw::PreferencesGroup, config: crate::confi
                 if let Ok(new_conf) = crate::config::load_config(&std::env::current_dir().unwrap()) {
                     s.config = new_conf;
                 }
+            }
+            // Re-render previews with the new formatter config
+            for tab in &s.open_tabs {
+                use glib::prelude::*;
+                tab.borrow().buffer.emit_by_name::<()>("changed", &[]);
             }
             drop(s);
             refresh_toolbar(state_clone.clone(), None);
